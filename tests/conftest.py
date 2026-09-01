@@ -46,3 +46,82 @@ def hub_hash() -> bytes:
 def msg_id() -> bytes:
     """Return the 8-byte message identifier from the 3-RRC MSG example."""
     return bytes.fromhex("7a3f8e1245c9a16d")
+
+
+class Harness:
+    """A live :class:`RRCSession` with its sent frames and events captured.
+
+    Wraps the state machine so tests can drive it without a Link: outbound
+    envelopes land in :attr:`sent` already decoded, and events destined for
+    WeeChat land in :attr:`events`.
+    """
+
+    #: Identity hash used for the local client in tests.
+    ME = bytes.fromhex("9c7e0102030405060708090a0b0c4a2f")
+    #: Identity hash used for the hub in tests.
+    HUB = bytes.fromhex("1f8a0102030405060708090a0b0cb3c5")
+    #: Identity hash used for a second client in tests.
+    PEER = bytes.fromhex("aabb0102030405060708090a0b0cccdd")
+
+    def __init__(self, nick=None):
+        """Create a session that records everything it sends and emits."""
+        from rrc_helper.session import RRCSession
+
+        self.raw = []
+        self.events = []
+        self.now = 1000.0
+        self.session = RRCSession(
+            self.ME,
+            send=self.raw.append,
+            emit=self.events.append,
+            nick=nick,
+            clock=lambda: self.now,
+        )
+
+    def feed(self, msg_type, **kwargs):
+        """Encode an envelope as if from the hub and hand it to the session."""
+        from rrc_helper import envelope as E
+
+        kwargs.setdefault("src", self.HUB)
+        self.session.on_frame(E.encode(msg_type, **kwargs))
+
+    def welcome(self, caps=(1, 2), limits=None, hub="TestHub"):
+        """Deliver a WELCOME, optionally advertising caps and limits."""
+        from rrc_helper import constants as C
+
+        body = {C.B_WELCOME_HUB: hub, C.B_WELCOME_VER: "0.1.0"}
+        body[C.B_WELCOME_CAPS] = {cap: True for cap in caps}
+        if limits:
+            body[C.B_WELCOME_LIMITS] = limits
+        self.feed(C.T_WELCOME, body=body)
+
+    @property
+    def sent(self):
+        """Return every outbound envelope, decoded."""
+        from rrc_helper import envelope as E
+
+        return [E.decode(raw) for raw in self.raw]
+
+    @property
+    def last(self):
+        """Return the most recently sent envelope, decoded."""
+        return self.sent[-1]
+
+    def ops(self, op):
+        """Return every emitted event whose ``op`` matches."""
+        return [e for e in self.events if e.get("op") == op]
+
+
+@pytest.fixture
+def harness():
+    """Return a session harness with no nickname set."""
+    return Harness()
+
+
+@pytest.fixture
+def ready():
+    """Return a harness that has already completed the HELLO/WELCOME exchange."""
+    h = Harness(nick="afri")
+    h.session.start()
+    h.welcome()
+    return h
