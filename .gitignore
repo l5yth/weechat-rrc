@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 l5yth & contributors
+# SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
 # SPDX-License-Identifier: Apache-2.0
 
 # Private key material — never commit; an RRC identity IS the account.
@@ -6,6 +6,12 @@ identity
 ids/
 *.identity
 *.key
+
+# Documentation stays local until it is decided whether to publish it.
+*.md
+
+# Agent harness: local tooling, not part of the project.
+.claude/
 
 # Test + build artifacts
 __pycache__/

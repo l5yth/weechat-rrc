@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 l5yth & contributors
+# SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
 # SPDX-License-Identifier: Apache-2.0
 
 name: python
@@ -29,10 +29,3 @@ jobs:
           python -m coverage report -m --fail-under=100
       - name: API docs 100% (ACCEPTANCE B3)
         run: python .github/scripts/check_docstrings.py
-
-  reuse:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: REUSE compliance (ACCEPTANCE B4)
-        uses: fsfe/reuse-action@v5

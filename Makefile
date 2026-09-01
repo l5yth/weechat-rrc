@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 l5yth & contributors
+# SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
 # SPDX-License-Identifier: Apache-2.0
 
 # Interpreter with RNS and cbor2 available. Override for other machines:
