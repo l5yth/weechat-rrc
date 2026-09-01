@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 l5yth & contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Private key material — never commit; an RRC identity IS the account.
+identity
+ids/
+*.identity
+*.key
+
+# Test + build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.e2e-hub-hash
+.e2e-rrcd/
+dist/
+build/
+*.egg-info/

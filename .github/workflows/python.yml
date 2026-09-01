@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 l5yth & contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: python
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: pip install rns cbor2 pytest coverage black
+      - name: Format check (ACCEPTANCE B5)
+        run: python -m black --check --diff .
+      - name: Tests (ACCEPTANCE B1)
+        run: python -m pytest -q
+      - name: Coverage floor 100% (ACCEPTANCE B2)
+        run: |
+          python -m coverage run --source=rrc,rrc_helper -m pytest -q
+          python -m coverage report -m --fail-under=100
+      - name: API docs 100% (ACCEPTANCE B3)
+        run: python .github/scripts/check_docstrings.py
+
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: REUSE compliance (ACCEPTANCE B4)
+        uses: fsfe/reuse-action@v5
