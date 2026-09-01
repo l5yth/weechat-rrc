@@ -32,6 +32,11 @@ rrc-helper = "rrc_helper.__main__:main"
 [tool.setuptools]
 packages = ["rrc_helper"]
 
+[tool.black]
+# Pin to the project's minimum Python so formatting is identical on every
+# machine, regardless of which interpreter happens to run black.
+target-version = ["py311"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["error"]
