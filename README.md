@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/l5yth/weechat-rrc/python.yml?branch=main)](https://github.com/l5yth/weechat-rrc/actions)
 [![Open-Source License](https://img.shields.io/github/license/l5yth/weechat-rrc)](LICENSE)
-
 [![Reticulum](https://img.shields.io/badge/Reticulum-supported-7b61ff)](https://reticulum.network)
 
 A WeeChat plugin for Reticulum Relay Chat (RRC).

@@ -472,3 +472,59 @@ def test_main_wires_stdin_to_a_helper(monkeypatch):
     )
     assert helper_mod.main([]) == 0
     assert captured["attached"]
+
+
+def test_hello_is_repeated_until_the_hub_welcomes(helper):
+    """A dropped HELLO must not leave the session waiting forever.
+
+    A hub discards any frame arriving before it has processed the Link's
+    identify. rrcd returns early while ``get_remote_identity()`` is still
+    ``None``, silently, so a HELLO that loses that race is simply lost and no
+    WELCOME ever comes.
+    """
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+
+    helper.handle({"op": "connect", "hub": HUB})
+    link = FakeHubLink.created[0]
+    helper._on_up()
+    assert len(link.sent) == 1, "one HELLO so far"
+
+    # The hub stays silent; the scheduled retry fires.
+    helper._resend_hello()
+    assert len(link.sent) == 2
+    assert E.decode(link.sent[1]).type == C.T_HELLO
+
+    # WELCOME arrives, so no further HELLO is sent.
+    helper.session.on_frame(E.encode(C.T_WELCOME, src=bytes.fromhex(PEER), body={}))
+    helper._resend_hello()
+    assert len(link.sent) == 2, "a welcomed session must not re-HELLO"
+
+
+def test_repeating_hello_stops_and_reports(helper):
+    """After the last attempt the user is told, rather than waiting silently."""
+    helper.handle({"op": "connect", "hub": HUB})
+    helper._on_up()
+    for _ in range(6):
+        helper._resend_hello()
+    link = FakeHubLink.created[0]
+    assert len(link.sent) == helper_mod.HELLO_MAX_ATTEMPTS
+    assert "never answered HELLO" in ops(helper, "error")[-1]["message"]
+
+
+def test_hello_retry_without_a_session_is_safe(helper):
+    """A disconnect racing the retry timer must not raise."""
+    helper.handle({"op": "connect", "hub": HUB})
+    helper.session = None
+    helper._resend_hello()
+
+
+def test_the_run_loop_dispatches_a_hello_retry(helper):
+    """The retry reaches the session through the main loop, not a timer thread."""
+    helper.handle({"op": "connect", "hub": HUB})
+    helper._on_up()
+    before = len(FakeHubLink.created[0].sent)
+    helper.events.put(("hello", None))
+    helper.events.put(("eof", None))
+    helper.run(io.BytesIO())
+    assert len(FakeHubLink.created[0].sent) == before + 1

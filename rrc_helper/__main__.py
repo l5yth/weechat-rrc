@@ -39,14 +39,29 @@ from . import link as link_mod
 from .session import RRCSession
 
 #: Queue entries are ``(kind, payload)``; these are the kinds.
-_CMD, _EOF, _UP, _FRAME, _DOWN, _RETRY = (
+_CMD, _EOF, _UP, _FRAME, _DOWN, _RETRY, _HELLO = (
     "cmd",
     "eof",
     "up",
     "frame",
     "down",
     "retry",
+    "hello",
 )
+
+#: How long to wait for ``WELCOME`` before repeating ``HELLO``.
+#:
+#: A hub drops any frame that arrives before it has processed the Link's
+#: identify: rrcd returns early when ``get_remote_identity()`` is still
+#: ``None``, silently. Our ``HELLO`` is sent immediately after ``identify()``
+#: and can lose that race on a slow or loaded path, leaving the session waiting
+#: for a ``WELCOME`` that will never arrive. Repeating it costs one small frame
+#: and is safe: a hub that has not welcomed us yet treats it as a first
+#: ``HELLO``.
+HELLO_RETRY_SECONDS = 8.0
+
+#: Total ``HELLO`` frames sent before giving up and telling the user.
+HELLO_MAX_ATTEMPTS = 3
 
 
 def claim_stdout() -> BinaryIO:
@@ -89,6 +104,7 @@ class Helper:
         self.autojoin: list[str] = []
         self.dest_hash: bytes | None = None
         self.reconnect = True
+        self.hello_attempts = 0
         self._schedule = schedule or self._timer
         self._running = True
 
@@ -244,7 +260,29 @@ class Helper:
         session = self.session
         if session is None:  # pragma: no cover - disconnect raced the callback
             return
+        self.hello_attempts = 1
         session.start()
+        self._schedule(HELLO_RETRY_SECONDS, lambda: self.events.put((_HELLO, None)))
+
+    def _resend_hello(self) -> None:
+        """Repeat ``HELLO`` if the hub has not welcomed us yet.
+
+        Only ever sent while the session is un-welcomed, so the hub treats it
+        as a first ``HELLO`` rather than a re-authentication, which would reset
+        room membership.
+        """
+        session = self.session
+        if session is None or session.ready:
+            return
+        if self.hello_attempts >= HELLO_MAX_ATTEMPTS:
+            self.fail(
+                "the hub accepted the link but never answered HELLO after "
+                f"{self.hello_attempts} attempts; it may be overloaded"
+            )
+            return
+        self.hello_attempts += 1
+        session.start()
+        self._schedule(HELLO_RETRY_SECONDS, lambda: self.events.put((_HELLO, None)))
 
     def _join_autojoin(self) -> None:
         """Join the configured rooms, once the hub has sent ``WELCOME``."""
@@ -322,6 +360,8 @@ class Helper:
                 self._on_down(payload)
             elif kind == _RETRY:
                 self._open_link()
+            elif kind == _HELLO:
+                self._resend_hello()
             else:
                 break  # EOF: WeeChat closed the pipe
         if self.hub is not None:
