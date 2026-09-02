@@ -58,8 +58,16 @@ PYTHON = os.environ.get("RRC_PYTHON", sys.executable)
 #: How long to wait for the hub to announce its destination hash.
 HUB_START_TIMEOUT = 30.0
 
-#: How long to wait for any single expected event.
-EVENT_TIMEOUT = 30.0
+#: How long to wait for any single expected event. Must exceed the helper's
+#: path-discovery timeout, or a connection that is still resolving looks
+#: identical to one that failed, and the helper's own error never surfaces in
+#: the failure message.
+EVENT_TIMEOUT = 60.0
+
+#: Time to let the hub settle after it registers its destination. A client that
+#: attaches to the shared instance before the hub has announced may wait a full
+#: discovery timeout for a path that is already there.
+HUB_SETTLE = 3.0
 
 
 def _rrcd_pythonpath() -> str | None:
@@ -138,6 +146,7 @@ class Hub:
         self.process = self._run()
         self.dest_hash = self._await_hash()
         HUB_HASH_FILE.write_text(self.dest_hash)
+        time.sleep(HUB_SETTLE)
 
     def _run(self) -> subprocess.Popen:
         """Launch one rrcd process, appending to the log."""
