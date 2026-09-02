@@ -54,7 +54,10 @@ DEFAULTS = {
 PROBE = "import RNS, cbor2"
 
 #: Interpreters tried when ``helper.python`` is not configured, in order.
-FALLBACK_PYTHONS = ("python3", "~/.venv/bin/python")
+#: ``RRC_VENV`` is the location the setup instructions suggest, so a user who
+#: follows them needs no configuration afterwards.
+RRC_VENV = "~/.local/share/weechat/rrc-venv/bin/python"
+FALLBACK_PYTHONS = ("python3", RRC_VENV, "~/.venv/bin/python")
 
 #: Marks a private-buffer callback payload, distinguishing it from a room.
 DM_PREFIX = "@"
@@ -128,6 +131,36 @@ def set_nonblocking(stream) -> None:
 #: ``python/``, and only ``realpath`` follows it to the directory that actually
 #: holds the helper. Verified against WeeChat 4.10.
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__)) if "__file__" in dir() else ""
+
+
+def missing_python_help() -> list[str]:
+    """Return step-by-step guidance for installing the helper's dependencies.
+
+    This fires the first time someone tries to connect, so it has to be enough
+    on its own. Distribution packages come first: they need no virtualenv and
+    no configuration afterwards, because they land in the same interpreter
+    WeeChat already embeds.
+    """
+    tried = ", ".join(os.path.expanduser(p) for p in FALLBACK_PYTHONS)
+    venv = os.path.expanduser(os.path.dirname(os.path.dirname(RRC_VENV)))
+    return [
+        "no Python with Reticulum (RNS) and cbor2 was found.",
+        f"tried: {tried}",
+        "",
+        "Option 1 - install them for your system Python. Nothing else to do:",
+        "  Arch     pikaur -S python-rns python-cbor2",
+        "  Debian   sudo apt install python3-rns python3-cbor2",
+        "  other    pip install --user rns cbor2",
+        "",
+        "Option 2 - if your distribution refuses to install them system-wide",
+        "(PEP 668, 'externally-managed-environment'), use a virtualenv. This",
+        "path is searched automatically, so no further setup is needed:",
+        f"  python3 -m venv {venv}",
+        f"  {venv}/bin/pip install rns cbor2",
+        "",
+        "Option 3 - point the plugin at a Python you already have:",
+        f"  /set plugins.var.python.{SCRIPT_NAME}.helper.python /path/to/python",
+    ]
 
 
 def helper_directory() -> str:
@@ -214,11 +247,8 @@ class Connection:
         """Spawn the helper and begin a session. Returns success."""
         python = find_python()
         if python is None:
-            self.display(
-                "no Python with Reticulum and cbor2 was found. Set one with: "
-                f"/set plugins.var.python.{SCRIPT_NAME}.helper.python "
-                "/path/to/python"
-            )
+            for line in missing_python_help():
+                self.display(line, "=!=")
             return False
         directory = helper_directory()
         env = dict(os.environ)

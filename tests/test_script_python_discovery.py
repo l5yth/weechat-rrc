@@ -91,14 +91,47 @@ def test_discovery_falls_back_to_the_system_interpreter(wee, monkeypatch):
     assert rrc.find_python() == "python3"
 
 
-def test_discovery_falls_back_to_a_virtualenv(wee, monkeypatch):
-    """A venv is tried last, and the result is expanded to a real path."""
+def test_discovery_finds_the_documented_virtualenv(wee, monkeypatch):
+    """The venv the setup guidance suggests is searched without configuration.
+
+    Users on a distribution that refuses system-wide installs (PEP 668) are
+    told to create this venv; discovery must then need no ``/set``.
+    """
     _, rrc = wee
     monkeypatch.delenv("RRC_PYTHON", raising=False)
-    monkeypatch.setattr(rrc, "probe_python", lambda path: "venv" in path)
+    monkeypatch.setattr(rrc, "probe_python", lambda path: "rrc-venv" in path)
     found = rrc.find_python()
-    assert found.endswith("/.venv/bin/python")
-    assert "~" not in found
+    assert found.endswith("/weechat/rrc-venv/bin/python")
+    assert "~" not in found, "the path must be expanded before use"
+
+
+def test_discovery_falls_back_to_a_generic_virtualenv(wee, monkeypatch):
+    """A plain ``~/.venv`` is tried last."""
+    _, rrc = wee
+    monkeypatch.delenv("RRC_PYTHON", raising=False)
+    monkeypatch.setattr(
+        rrc, "probe_python", lambda path: path.endswith("/.venv/bin/python")
+    )
+    assert rrc.find_python().endswith("/.venv/bin/python")
+
+
+def test_missing_python_guidance_is_actionable(wee):
+    """The failure must be enough on its own to get a user unstuck.
+
+    It fires the first time anyone tries to connect, so it names the packages,
+    a distribution command, the PEP 668 escape hatch, and the config option.
+    """
+    _, rrc = wee
+    text = "\n".join(rrc.missing_python_help())
+    assert "RNS" in text and "cbor2" in text
+    assert "python-rns" in text
+    assert "externally-managed-environment" in text
+    assert "python3 -m venv" in text
+    assert f"plugins.var.python.{rrc.SCRIPT_NAME}.helper.python" in text
+    # Every interpreter that was tried is listed, expanded, so the user can see
+    # which ones were checked.
+    assert "python3" in text
+    assert "~" not in text.split("tried:")[1].split("\n")[0]
 
 
 def test_discovery_returns_none_when_nothing_qualifies(wee, monkeypatch):

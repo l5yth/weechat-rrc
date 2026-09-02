@@ -12,15 +12,42 @@ A WeeChat plugin for Reticulum Relay Chat (RRC).
 | | |
 | --- | --- |
 | WeeChat | 4.x with the `python` plugin |
-| Python | 3.11+ with `rns` and `cbor2` |
+| Python | 3.11+ with `rns` and `cbor2` (see Dependencies) |
 | Reticulum | a running shared instance (`rnsd`) |
+
+## Dependencies
+
+`rns` and `cbor2` must be importable Python. Install
+them for the system Python and nothing further is needed:
+
+| | |
+| --- | --- |
+| Arch | `pikaur -S python-rns python-cbor2` |
+| Debian | `apt install python3-rns python3-cbor2` |
+| other | `pip install --user rns cbor2` |
+
+The `rrc` plugin is looking in the `rrc-venv` if it does not find
+any system packages, so the following provides it for weechat-rrc
+only (no `/set` required):
+
+```sh
+python -m venv ~/.local/share/weechat/rrc-venv
+~/.local/share/weechat/rrc-venv/bin/pip install rns cbor2
+```
+
+But any other Python works too: 
+
+```sh
+/set plugins.var.python.rrc.helper.python <path>
+```
 
 ## Install
 
 ```sh
-mkdir -p ~/.local/share/weechat/python/autoload
 cp -r rrc.py rrc_helper ~/.local/share/weechat/python/
+
 # optional: load at every WeeChat start
+mkdir -p ~/.local/share/weechat/python/autoload
 ln -sf ../rrc.py ~/.local/share/weechat/python/autoload/rrc.py
 ```
 
@@ -76,7 +103,8 @@ Hub commands vary per hub. `rrcd` accepts `//who`, `//names`, `//list`, `//topic
 | `autojoin` | *(empty)* | Comma-separated rooms to rejoin |
 | `reconnect` | `on` | Reconnect with backoff on link loss |
 
-Interpreter resolution: `helper.python` → `$RRC_PYTHON` → `python3` → `~/.venv/bin/python`.
+Interpreter resolution: `helper.python` → `$RRC_PYTHON` → `python3` →
+`~/.local/share/weechat/rrc-venv/bin/python` → `~/.venv/bin/python`.
 
 ## Buffers
 
