@@ -12,11 +12,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches requires-python = ">=3.11". WeeChat embeds whatever Python
+        # the distribution ships, so the floor is tested as well as the top.
+        python-version: ["3.11", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install rns cbor2 pytest coverage black
       - name: Format check (ACCEPTANCE B5)
@@ -25,7 +31,32 @@ jobs:
         run: python -m pytest -q
       - name: Coverage floor 100% (ACCEPTANCE B2)
         run: |
-          python -m coverage run --source=rrc,rrc_helper -m pytest -q
+          python -m coverage run -m pytest -q
           python -m coverage report -m --fail-under=100
       - name: API docs 100% (ACCEPTANCE B3)
         run: python .github/scripts/check_docstrings.py
+
+  licence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: SPDX tags and notices (ACCEPTANCE B4)
+        run: make licence | tee /tmp/licence.log
+      - name: Fail on any missing header
+        run: "! grep -q MISSING /tmp/licence.log"
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: pip install rns cbor2 tomlkit pytest
+      - name: Fetch the reference hub
+        run: git clone --depth 1 https://github.com/kc1awv/rrcd /tmp/rrcd
+      - name: End-to-end against a real rrcd hub (ACCEPTANCE A1)
+        env:
+          RRCD_PATH: /tmp/rrcd
+        run: make e2e PYTHON=python

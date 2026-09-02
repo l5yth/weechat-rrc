@@ -3,7 +3,7 @@
 
 # Interpreter with RNS and cbor2 available. Override for other machines:
 #   make test PYTHON=/path/to/python
-PYTHON ?= $(shell command -v rrc-python 2>/dev/null || echo python3)
+PYTHON ?= $(if $(RRC_PYTHON),$(RRC_PYTHON),python3)
 
 .PHONY: help test coverage fmt fmt-check docs licence check e2e clean
 
@@ -39,7 +39,7 @@ licence:  ## Verify SPDX tags and notices on tracked files (ACCEPTANCE B4)
 check: fmt-check test coverage docs licence  ## Everything that gates a change
 
 e2e:  ## End-to-end against a local rrcd hub (ACCEPTANCE A1)
-	$(PYTHON) -m pytest -q tests/test_e2e.py -rs
+	$(PYTHON) -m pytest -q tests/test_e2e.py -rs -s
 
 clean:  ## Remove build and test artefacts
 	find . -name __pycache__ -type d -exec rm -r {} + 2>/dev/null || true
