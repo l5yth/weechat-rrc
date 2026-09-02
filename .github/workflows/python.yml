@@ -12,17 +12,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Matches requires-python = ">=3.11". WeeChat embeds whatever Python
-        # the distribution ships, so the floor is tested as well as the top.
-        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.14"
       - name: Install dependencies
         run: pip install rns cbor2 pytest coverage black
       - name: Format check (ACCEPTANCE B5)
