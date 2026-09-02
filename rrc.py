@@ -32,6 +32,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import subprocess
 
 import weechat
@@ -58,6 +59,15 @@ PROBE = "import RNS, cbor2"
 #: follows them needs no configuration afterwards.
 RRC_VENV = "~/.local/share/weechat/rrc-venv/bin/python"
 FALLBACK_PYTHONS = ("python3", RRC_VENV, "~/.venv/bin/python")
+
+#: A hub notice listing a room's members, as rrcd answers "/who". The room is
+#: taken from the text because such a notice may carry no room field.
+MEMBER_LIST = re.compile(r"^members in (\S+):\s*(.+)$", re.DOTALL)
+
+#: One "(identity)" in that listing. Hashes are abbreviated, so they are
+#: matched as a prefix of a full one. Requiring hex keeps a parenthesised part
+#: of somebody's name, such as "Flo (floscodes)", from being read as an id.
+MEMBER_ENTRY = re.compile(r"\(([0-9a-f]{6,32})\)")
 
 #: Marks a private-buffer callback payload, distinguishing it from a room.
 DM_PREFIX = "@"
@@ -431,6 +441,42 @@ class Connection:
                 return nick
         return short(identity)
 
+    def learn_members(self, body: str) -> bool:
+        """Adopt nicknames from a hub notice that lists a room's members.
+
+        A hub answering ``//who`` names everyone at once, which is the only way
+        to put nicknames on members who joined before this client did: the
+        ``JOINED`` member list carries identity hashes and nothing else.
+
+        This recognises a reply shape rather than assuming any hub command
+        exists; a notice that does not match leaves everything untouched. Only
+        members already known in the room are updated, so a notice cannot
+        invent nicklist entries.
+
+        Args:
+            body: The notice text.
+
+        Returns:
+            ``True`` if the notice was a member listing.
+        """
+        listing = MEMBER_LIST.match(body.strip())
+        if listing is None:
+            return False
+        room = listing.group(1).lower()
+        known = self.members.get(room)
+        if not known:
+            return True
+        rest, position = listing.group(2), 0
+        for entry in MEMBER_ENTRY.finditer(rest):
+            name = rest[position : entry.start()].strip().strip(",").strip()
+            position = entry.end()
+            prefix = entry.group(1)
+            matches = [i for i in known if i.startswith(prefix)]
+            if name and len(matches) == 1:
+                known[matches[0]] = name
+        self.refresh_nicklist(room)
+        return True
+
     def note_member(self, room: str, identity: str, nick: str = "") -> None:
         """Record that *identity* is in *room*, keeping any known nickname.
 
@@ -607,6 +653,8 @@ class Connection:
         body = clean(event.get("body"))
         name = speaker(event)
         kind = event.get("kind")
+        if kind == "notice":
+            self.learn_members(body)
         if kind == "action":
             weechat.prnt(target, f" *\t{name} {body}")
         elif kind == "notice":

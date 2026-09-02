@@ -307,3 +307,125 @@ def test_a_rejoin_after_a_part_is_announced(connected):
     text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
     assert text.count("bob joined") == 1
     assert text.count("left") == 1
+
+
+LISTING = (
+    "members in #general: jmeshy (%s), Flo (floscodes) (%s), "
+    "adept \U0001f432 (%s)" % (ALICE[:12], BOB[:12], "cccccccccccc")
+)
+
+
+def test_a_member_listing_names_everyone_at_once(connected):
+    """A hub's //who reply puts names on members who joined before us.
+
+    The JOINED member list carries only identity hashes, so without this the
+    nicklist stays a column of hex for everyone already present.
+    """
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [ALICE, BOB]},
+        {
+            "op": "chat",
+            "kind": "notice",
+            "room": "#general",
+            "src": ALICE,
+            "body": LISTING,
+        },
+    )
+    assert nicks(weechat, connection, "#general") == {"jmeshy", "Flo (floscodes)"}
+
+
+def test_a_listing_matches_abbreviated_hashes(connected):
+    """Hub listings abbreviate identities, so they match as a prefix."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [ALICE]},
+    )
+    connection.learn_members(f"members in #general: alice ({ALICE[:12]})")
+    assert connection.members["#general"][ALICE] == "alice"
+
+
+def test_a_listing_keeps_parentheses_in_a_name(connected):
+    """A parenthesised part of a name is not mistaken for an identity."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [BOB]},
+    )
+    connection.learn_members(f"members in #general: Flo (floscodes) ({BOB[:12]})")
+    assert connection.members["#general"][BOB] == "Flo (floscodes)"
+
+
+def test_a_listing_cannot_invent_members(connected):
+    """A notice may rename known members, never add unknown ones."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [ALICE]},
+    )
+    connection.learn_members(
+        f"members in #general: alice ({ALICE[:12]}), intruder (ffffffffffff)"
+    )
+    assert set(connection.members["#general"]) == {ALICE}
+
+
+def test_an_ambiguous_prefix_is_skipped(connected):
+    """A prefix matching two members names neither, rather than guessing."""
+    weechat, rrc, connection, process = connected
+    twin = ALICE[:12] + "f" * 20
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [ALICE, twin]},
+    )
+    connection.learn_members(f"members in #general: someone ({ALICE[:12]})")
+    assert connection.members["#general"][ALICE] == ""
+    assert connection.members["#general"][twin] == ""
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["hello everyone", "room #general: registered; mode=+nrt", "members in", ""],
+)
+def test_an_ordinary_notice_is_left_alone(connected, body):
+    """Anything that is not a member listing changes nothing."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [ALICE]},
+    )
+    assert connection.learn_members(body) is False
+    assert connection.members["#general"][ALICE] == ""
+
+
+def test_a_listing_for_a_room_we_are_not_in_is_ignored(connected):
+    """A listing for an unjoined room is recognised but changes nothing."""
+    weechat, rrc, connection, process = connected
+    assert connection.learn_members(f"members in #elsewhere: a ({ALICE[:12]})")
+    assert "#elsewhere" not in connection.members
+
+
+def test_a_listing_without_a_hash_prefix_room_marker_is_matched(connected):
+    """Rooms named without a leading # are matched case-insensitively."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "reticulumberlin", "members": [ALICE]},
+    )
+    connection.learn_members(f"members in ReticulumBerlin: guvy ({ALICE[:12]})")
+    assert connection.members["reticulumberlin"][ALICE] == "guvy"
