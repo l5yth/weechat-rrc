@@ -9,6 +9,7 @@ ids/
 
 # Documentation stays local until it is decided whether to publish it.
 *.md
+!README.md
 
 # Agent harness: local tooling, not part of the project.
 .claude/
