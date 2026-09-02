@@ -18,8 +18,13 @@ A WeeChat plugin for Reticulum Relay Chat (RRC).
 ## Install
 
 ```sh
+mkdir -p ~/.local/share/weechat/python/autoload
 cp -r rrc.py rrc_helper ~/.local/share/weechat/python/
+# optional: load at every WeeChat start
+ln -sf ../rrc.py ~/.local/share/weechat/python/autoload/rrc.py
 ```
+
+`rrc_helper` must stay beside `rrc.py` in `python/`, not in `autoload/`.
 
 ```
 /script load ~/.local/share/weechat/python/rrc.py

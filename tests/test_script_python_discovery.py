@@ -22,6 +22,7 @@ message must say what to do about it.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 
@@ -152,3 +153,41 @@ def test_helper_directory_falls_back_to_the_weechat_directory(wee, monkeypatch):
     _, rrc = wee
     monkeypatch.setattr(rrc, "SCRIPT_DIR", "")
     assert rrc.helper_directory() == "/home/user/.config/weechat/python"
+
+
+def test_helper_directory_follows_an_autoload_symlink(wee, tmp_path, monkeypatch):
+    """A script symlinked into ``python/autoload/`` still finds the helper.
+
+    That symlink is the conventional way to autoload a WeeChat script.
+    ``abspath`` would report the ``autoload`` directory, which holds only the
+    link; ``realpath`` reports ``python/``, where the package actually is.
+    """
+    _, rrc = wee
+    scripts = tmp_path / "python"
+    (scripts / "rrc_helper").mkdir(parents=True)
+    (scripts / "autoload").mkdir()
+    real = scripts / "rrc.py"
+    real.write_text("")
+    link = scripts / "autoload" / "rrc.py"
+    link.symlink_to(real)
+    monkeypatch.setattr(rrc, "SCRIPT_DIR", os.path.dirname(os.path.realpath(link)))
+    assert rrc.helper_directory() == str(scripts)
+
+
+def test_helper_directory_searches_the_parent_directory(wee, tmp_path, monkeypatch):
+    """A copy in ``autoload/`` finds the package left in ``python/``."""
+    _, rrc = wee
+    scripts = tmp_path / "python"
+    (scripts / "rrc_helper").mkdir(parents=True)
+    (scripts / "autoload").mkdir()
+    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(scripts / "autoload"))
+    assert rrc.helper_directory() == str(scripts)
+
+
+def test_helper_directory_prefers_the_script_directory(wee, tmp_path, monkeypatch):
+    """When the package sits beside the script, that directory wins."""
+    _, rrc = wee
+    scripts = tmp_path / "python"
+    (scripts / "rrc_helper").mkdir(parents=True)
+    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(scripts))
+    assert rrc.helper_directory() == str(scripts)

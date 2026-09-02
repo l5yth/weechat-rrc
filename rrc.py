@@ -123,20 +123,29 @@ def set_nonblocking(stream) -> None:
 #: Directory this script was loaded from, captured while the module executes.
 #: WeeChat removes ``__file__`` from a script's globals before any callback
 #: runs, so reading it later yields ``None`` and the helper would be looked for
-#: in the wrong place. Verified against WeeChat 4.10.
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ""
+#: in the wrong place. ``realpath`` rather than ``abspath``: the conventional
+#: way to autoload a script is a symlink in ``python/autoload/`` pointing at
+#: ``python/``, and only ``realpath`` follows it to the directory that actually
+#: holds the helper. Verified against WeeChat 4.10.
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__)) if "__file__" in dir() else ""
 
 
 def helper_directory() -> str:
     """Return the directory containing the ``rrc_helper`` package.
 
-    The helper lives beside this script, so :data:`SCRIPT_DIR` is used when it
-    is known. The WeeChat data directory is the fallback for the case where the
-    script was executed without a file path.
+    The helper normally sits beside this script. The parent directory is also
+    tried, so that copying the script into ``python/autoload/`` while leaving
+    the package in ``python/`` still works. The WeeChat data directory is the
+    last resort, for the case where the script has no file path at all.
     """
+    candidates = []
     if SCRIPT_DIR:
-        return SCRIPT_DIR
-    return os.path.join(weechat.info_get("weechat_dir", ""), "python")
+        candidates += [SCRIPT_DIR, os.path.dirname(SCRIPT_DIR)]
+    candidates.append(os.path.join(weechat.info_get("weechat_dir", ""), "python"))
+    for candidate in candidates:
+        if candidate and os.path.isdir(os.path.join(candidate, "rrc_helper")):
+            return candidate
+    return candidates[0]
 
 
 # -- display helpers -------------------------------------------------------
