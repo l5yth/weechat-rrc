@@ -133,7 +133,15 @@ def prnt(buffer, message):
 
 
 def buffer_new(name, input_cb, input_data, close_cb, close_data):
-    """Create a buffer and return its pointer."""
+    """Create a buffer and return its pointer, or "" if the name is taken.
+
+    WeeChat refuses a duplicate name, prints "a buffer with same name already
+    exists" on the core buffer, and returns an empty pointer. Anything later
+    printed to that empty pointer lands on the core buffer instead.
+    """
+    if buffer_search("python", name):
+        state.core.append(f"A buffer with same name ({name}) already exists")
+        return ""
     pointer = state.pointer("b")
     state.buffers[pointer] = Buffer(name, input_cb, input_data, close_cb, close_data)
     return pointer

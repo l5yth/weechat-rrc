@@ -458,3 +458,69 @@ def test_a_missing_helper_package_is_diagnosed(wee, monkeypatch, tmp_path):
     assert "rrc_helper package was not found" in text
     assert str(tmp_path) in text
     assert "/python reload rrc" in text
+
+
+def test_reconnecting_after_a_disconnect_reuses_the_buffer(connected, monkeypatch):
+    """Disconnect then connect must not collide on the buffer name.
+
+    Disconnecting leaves the buffer open so scrollback survives, as the irc
+    plugin does. WeeChat then refuses a second buffer with the same name and
+    returns an empty pointer, and everything printed to it lands on the core
+    buffer: the session looks connected but appears in the wrong place, and
+    its own buffer is orphaned.
+    """
+    from tests.conftest import FakeProcess
+
+    weechat, rrc, connection, process = connected
+    first_buffer = connection.buffer
+    rrc.rrc_command_cb("", connection.buffer, "disconnect")
+    assert rrc.connections == {}
+
+    second = FakeProcess()
+    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    try:
+        assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_OK
+        reconnected = rrc.connections["28c7c1a6"]
+        assert reconnected.buffer == first_buffer, "a second buffer was created"
+        assert reconnected.buffer != "", "buffer_new failed and output would go to core"
+        assert not any("already exists" in line for line in weechat.state.core)
+        # Session output must reach the plugin's own buffer, not core.
+        before = len(weechat.state.core)
+        reconnected.display("hello")
+        assert len(weechat.state.core) == before
+        assert "hello" in weechat.state.buffers[reconnected.buffer].text
+    finally:
+        second.cleanup()
+
+
+def test_a_room_buffer_is_reused_after_reconnecting(connected, monkeypatch):
+    """Rejoining a room reuses its buffer rather than colliding."""
+    from tests.conftest import FakeProcess
+
+    weechat, rrc, connection, process = connected
+    room_buffer = connection.room_buffer("#general")
+    rrc.rrc_command_cb("", connection.buffer, "disconnect")
+    second = FakeProcess()
+    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    try:
+        rrc.rrc_command_cb("", "", f"connect {HUB}")
+        assert rrc.connections["28c7c1a6"].room_buffer("#general") == room_buffer
+    finally:
+        second.cleanup()
+
+
+def test_a_private_buffer_is_reused_after_reconnecting(connected, monkeypatch):
+    """A conversation buffer survives a reconnect without colliding."""
+    from tests.conftest import FakeProcess
+
+    peer = "1f5a80f61a6194267cf6b6df6a954adb"
+    weechat, rrc, connection, process = connected
+    dm = connection.dm_buffer(peer)
+    rrc.rrc_command_cb("", connection.buffer, "disconnect")
+    second = FakeProcess()
+    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    try:
+        rrc.rrc_command_cb("", "", f"connect {HUB}")
+        assert rrc.connections["28c7c1a6"].dm_buffer(peer) == dm
+    finally:
+        second.cleanup()

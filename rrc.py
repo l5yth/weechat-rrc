@@ -271,7 +271,14 @@ class Connection:
         self.dms: dict[str, str] = {}
         self.hooks: list[str] = []
         self._reader = None
-        self.buffer = weechat.buffer_new(
+        # Reuse the buffer if one is already open under this name. Closing a
+        # session leaves its buffer behind so the scrollback survives, exactly
+        # as the irc plugin does, and WeeChat refuses to create a second buffer
+        # with the same name: it returns an empty pointer, and everything then
+        # printed to it lands on the core buffer instead.
+        self.buffer = weechat.buffer_search(
+            "python", f"{SCRIPT_NAME}.{name}"
+        ) or weechat.buffer_new(
             f"{SCRIPT_NAME}.{name}", "rrc_input_cb", name, "rrc_close_cb", name
         )
         weechat.buffer_set(self.buffer, "title", f"RRC hub {hub_hash}")
@@ -377,6 +384,11 @@ class Connection:
         """Return the buffer for *room*, creating it if necessary."""
         if room in self.rooms:
             return self.rooms[room]
+        name = f"{SCRIPT_NAME}.{self.name}.{room}"
+        existing = weechat.buffer_search("python", name)
+        if existing:
+            self.rooms[room] = existing
+            return existing
         pointer = weechat.buffer_new(
             f"{SCRIPT_NAME}.{self.name}.{room}",
             "rrc_input_cb",
@@ -419,6 +431,11 @@ class Connection:
         """
         if identity in self.dms:
             return self.dms[identity]
+        name = f"{SCRIPT_NAME}.{self.name}.{short(identity)}"
+        existing = weechat.buffer_search("python", name)
+        if existing:
+            self.dms[identity] = existing
+            return existing
         pointer = weechat.buffer_new(
             f"{SCRIPT_NAME}.{self.name}.{short(identity)}",
             "rrc_input_cb",
