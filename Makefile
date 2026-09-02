@@ -30,6 +30,7 @@ docs:  ## Verify 100% API-doc coverage (ACCEPTANCE B3)
 licence:  ## Verify SPDX tags and notices on tracked files (ACCEPTANCE B4)
 	@for f in $$(git ls-files); do \
 		[ "$$f" = LICENSE ] && continue; \
+		grep -Iq . "$$f" || continue; \
 		grep -qF 'SPDX-License-Identifier: Apache-2.0' "$$f" \
 			|| echo "MISSING SPDX: $$f"; \
 		case "$$f" in *.py) grep -qF 'Licensed under the Apache License, Version 2.0' \
