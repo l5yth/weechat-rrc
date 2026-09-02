@@ -40,6 +40,7 @@ target-version = ["py311"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["error"]
+markers = ["e2e: needs a running rrcd hub and a working Reticulum stack"]
 
 [tool.coverage.run]
 branch = true
