@@ -147,7 +147,7 @@ def test_connect_without_an_interpreter_names_the_option(wee, monkeypatch):
     weechat, rrc = wee
     monkeypatch.setattr(rrc, "find_python", lambda: None)
     rrc.rrc_command_cb("", "", "connect 28c7c1a68c735693aa8e6b8193ed44b2")
-    buffer = weechat.state.buffer("rrc.28c7c1a6")
+    buffer = weechat.state.any_buffer("rrc.28c7c1a6")
     assert any("helper.python" in line for line in buffer.text)
     assert rrc.connections == {}  # the failed connection was not retained
 

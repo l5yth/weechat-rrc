@@ -163,6 +163,33 @@ def missing_python_help() -> list[str]:
     ]
 
 
+def missing_helper_help(directory: str) -> list[str]:
+    """Return guidance for a script installed without its helper package.
+
+    Checked before spawning, because otherwise the only symptom is the helper
+    exiting with ``No module named rrc_helper``, which says nothing about where
+    the script looked or what to copy.
+    """
+    searched = [SCRIPT_DIR, os.path.dirname(SCRIPT_DIR)] if SCRIPT_DIR else []
+    searched.append(os.path.join(weechat.info_get("weechat_dir", ""), "python"))
+    lines = [
+        "the rrc_helper package was not found, so the helper cannot start.",
+        "It must sit in the same directory as rrc.py.",
+        "",
+        "searched:",
+    ]
+    lines += [f"  {d}" for d in dict.fromkeys(d for d in searched if d)]
+    lines += [
+        "",
+        f"this script was loaded from: {SCRIPT_DIR or '(unknown)'}",
+        "",
+        "Copy the package next to the script, for example:",
+        f"  cp -r /path/to/weechat-rrc/rrc_helper {directory}/",
+        "then reload with: /python reload rrc",
+    ]
+    return lines
+
+
 def helper_directory() -> str:
     """Return the directory containing the ``rrc_helper`` package.
 
@@ -251,6 +278,10 @@ class Connection:
                 self.display(line, "=!=")
             return False
         directory = helper_directory()
+        if not os.path.isdir(os.path.join(directory, "rrc_helper")):
+            for line in missing_helper_help(directory):
+                self.display(line, "=!=")
+            return False
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(
             [directory, env.get("PYTHONPATH", "")]
@@ -863,7 +894,11 @@ def _cmd_connect(args: list[str], buffer: str) -> int:
     connection = Connection(name, hub_hash, nick)
     connections[name] = connection
     if not connection.start():
+        # Close the buffer too. Leaving it open made the next attempt fail
+        # with "a buffer with same name already exists", burying the real
+        # error under a second, unrelated one.
         connections.pop(name, None)
+        weechat.buffer_close(connection.buffer)
         return weechat.WEECHAT_RC_ERROR
     return weechat.WEECHAT_RC_OK
 

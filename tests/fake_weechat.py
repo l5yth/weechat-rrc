@@ -64,6 +64,7 @@ class State:
         """Start with no buffers, hooks, config, or registration."""
         self.registered = None
         self.buffers = {}
+        self.closed = {}
         self.core = []
         self.hooks = {}
         self.config = {}
@@ -75,11 +76,30 @@ class State:
         self.__init__()
 
     def buffer(self, name):
-        """Return the buffer whose short name is *name*, or ``None``."""
+        """Return the open buffer whose short name is *name*, or ``None``."""
         for buf in self.buffers.values():
             if buf.name == name:
                 return buf
         return None
+
+    def any_buffer(self, name):
+        """Return the buffer called *name*, open or closed, or ``None``.
+
+        Closed buffers are kept so a test can still inspect what was printed to
+        one before it was closed.
+        """
+        for buf in list(self.buffers.values()) + list(self.closed.values()):
+            if buf.name == name:
+                return buf
+        return None
+
+    @property
+    def all_text(self):
+        """Return every line printed to any buffer, open or closed."""
+        lines = []
+        for buf in list(self.buffers.values()) + list(self.closed.values()):
+            lines += buf.text
+        return "\n".join(lines)
 
     def pointer(self, prefix):
         """Return a fresh opaque pointer string, as WeeChat would."""
@@ -143,10 +163,14 @@ def buffer_search(plugin, name):
 
 
 def buffer_close(buffer):
-    """Mark a buffer closed and drop it."""
+    """Mark a buffer closed and move it out of the open set.
+
+    The object is retained so tests can inspect what was printed to it.
+    """
     buf = state.buffers.pop(buffer, None)
     if buf is not None:
         buf.closed = True
+        state.closed[buffer] = buf
 
 
 def current_buffer():

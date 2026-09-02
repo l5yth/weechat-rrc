@@ -113,8 +113,9 @@ def test_connect_reports_a_helper_that_will_not_start(wee, monkeypatch):
 
     monkeypatch.setattr(rrc.subprocess, "Popen", boom)
     assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
-    buffer = weechat.state.buffer("rrc.28c7c1a6")
+    buffer = weechat.state.any_buffer("rrc.28c7c1a6")
     assert any("could not start the helper" in line for line in buffer.text)
+    assert buffer.closed, "a failed connect must not leave its buffer open"
     assert rrc.connections == {}
 
 
@@ -417,3 +418,43 @@ def test_stopping_a_process_without_stdin_is_safe(connected):
     process.stdin = None
     connection.stop()
     assert connection.process is None
+
+
+def test_a_failed_connect_closes_its_buffer(wee, monkeypatch):
+    """A failed connect must not leave its buffer behind.
+
+    It did, so the next attempt hit "a buffer with same name already exists"
+    and that unrelated error buried the real one.
+    """
+    weechat, rrc = wee
+    monkeypatch.setattr(rrc, "find_python", lambda: None)
+    assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
+    assert rrc.connections == {}
+    # Retrying must reach the same failure, not a buffer-name collision.
+    assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
+    assert not any(
+        "already exists" in line for line in weechat.state.core
+    ), "the buffer from the first attempt was left open"
+
+
+def test_a_missing_helper_package_is_diagnosed(wee, monkeypatch, tmp_path):
+    """A script installed without rrc_helper says so, and where it looked.
+
+    Otherwise the only symptom is the helper exiting with
+    "No module named rrc_helper", which names neither the search path nor the
+    fix.
+    """
+    weechat, rrc = wee
+    monkeypatch.setattr(rrc, "find_python", lambda: "python3")
+    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(tmp_path))
+    monkeypatch.setattr(rrc, "helper_directory", lambda: str(tmp_path))
+
+    def must_not_spawn(*args, **kwargs):
+        raise AssertionError("the helper must not be spawned without its package")
+
+    monkeypatch.setattr(rrc.subprocess, "Popen", must_not_spawn)
+    assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
+    text = weechat.state.all_text
+    assert "rrc_helper package was not found" in text
+    assert str(tmp_path) in text
+    assert "/python reload rrc" in text
