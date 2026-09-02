@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 
 A WeeChat plugin for Reticulum Relay Chat (RRC).
 
+![screenshot of the first working weechat rrc plugin](scrot.png)
+
 ## Requirements
 
 | | |
