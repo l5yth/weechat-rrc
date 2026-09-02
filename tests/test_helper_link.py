@@ -178,13 +178,30 @@ def test_resolve_requests_a_path_and_waits(fake_rns):
 
 def test_resolve_times_out_with_an_actionable_message(fake_rns):
     """No route is the common failure, so the message says so."""
-    clock = iter([0.0, 5.0, 40.0])
+    clock = iter([0.0, 5.0, 40.0, 41.0])
     with pytest.raises(LinkError) as excinfo:
         link_mod.resolve_hub(
             HUB, timeout=30.0, sleep=lambda s: None, clock=lambda: next(clock)
         )
     assert "no path" in str(excinfo.value)
     assert "no route to this hub" in str(excinfo.value)
+    assert "rnstatus" in str(excinfo.value)
+
+
+def test_resolve_reports_time_actually_waited(fake_rns):
+    """The message states measured elapsed time, not the configured timeout.
+
+    Quoting the setting back is misleading: a user watching the buffer sees
+    errors one backoff-plus-timeout apart and cannot reconcile that with a
+    fixed number they never chose.
+    """
+    clock = iter([100.0, 105.0, 142.0, 147.0])
+    with pytest.raises(LinkError) as excinfo:
+        link_mod.resolve_hub(
+            HUB, timeout=30.0, sleep=lambda s: None, clock=lambda: next(clock)
+        )
+    assert "after 47s" in str(excinfo.value)
+    assert "after 30s" not in str(excinfo.value)
 
 
 def test_resolve_reports_an_unrecallable_identity(fake_rns):

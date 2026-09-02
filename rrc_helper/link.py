@@ -131,13 +131,19 @@ def resolve_hub(
             common and usually means the local node has no route to the hub.
     """
     if not RNS.Transport.has_path(dest_hash):
+        started = clock()
         RNS.Transport.request_path(dest_hash)
-        deadline = clock() + timeout
+        deadline = started + timeout
         while not RNS.Transport.has_path(dest_hash):
             if clock() >= deadline:
+                # Report the time actually spent waiting, not the configured
+                # timeout: the two differ, and quoting the setting back at the
+                # user tells them nothing they did not already configure.
                 raise LinkError(
-                    f"no path to {dest_hash.hex()} after {timeout:.0f}s; the "
-                    f"local Reticulum node may have no route to this hub"
+                    f"no path to {dest_hash.hex()} after "
+                    f"{clock() - started:.0f}s of path discovery; the local "
+                    f"Reticulum node has no route to this hub. Check "
+                    f"'rnstatus' shows your interfaces"
                 )
             sleep(0.1)
     identity = RNS.Identity.recall(dest_hash)

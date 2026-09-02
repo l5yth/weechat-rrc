@@ -7,6 +7,12 @@ ids/
 *.identity
 *.key
 
+# A Reticulum config directory created or copied into the checkout. Its
+# storage/identities/ holds private keys, and committing one is unrecoverable
+# disclosure. rnsd reads ~/.reticulum, not this, so it should not be here at
+# all — but if it is, it must never be committed.
+.reticulum/
+
 # Documentation stays local until it is decided whether to publish it.
 *.md
 !README.md
