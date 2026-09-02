@@ -281,7 +281,12 @@ class RRCSession:
     # -- inbound handlers -------------------------------------------------
 
     def _on_welcome(self, env: E.Envelope) -> None:
-        """Record what the hub advertised and open the session for use."""
+        """Record what the hub advertised and open the session for use.
+
+        The hub's own identity is reported so clients can tell hub-generated
+        notices apart from room members; a hub is not a member of the rooms it
+        relays.
+        """
         body = env.body if isinstance(env.body, dict) else {}
         self.hub_name = sanitise(body.get(C.B_WELCOME_HUB))
         self.hub_caps = parse_caps(body.get(C.B_WELCOME_CAPS))
@@ -290,6 +295,7 @@ class RRCSession:
         self._emit(
             {
                 "op": "welcome",
+                "src": env.src.hex(),
                 "hub": self.hub_name,
                 "version": sanitise(body.get(C.B_WELCOME_VER)),
                 "caps": sorted(self.hub_caps),

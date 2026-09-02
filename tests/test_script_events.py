@@ -346,8 +346,8 @@ def test_control_characters_cannot_forge_a_buffer_line(connected):
     assert rendered[0].count(TAB) == 1
 
 
-def test_a_direct_message_is_shown(connected):
-    """Direct messages are visible pending their own buffer."""
+def test_a_direct_message_opens_a_private_buffer(connected):
+    """A direct message gets its own buffer, keyed by identity hash."""
     weechat, rrc, connection, process = connected
     deliver(
         rrc,
@@ -355,7 +355,35 @@ def test_a_direct_message_is_shown(connected):
         process,
         {"op": "direct", "src": PEER, "nick": "alice", "body": "psst"},
     )
-    assert any("alice: psst" in line for line in lines(weechat, connection.buffer))
+    buffer = weechat.state.buffer(f"rrc.28c7c1a6.{PEER[:8]}")
+    assert buffer is not None
+    assert buffer.properties["localvar_set_type"] == "private"
+    assert buffer.properties["short_name"] == "alice"
+    assert "alice" + TAB + "psst" in buffer.lines
+
+
+def test_direct_messages_reuse_one_buffer_per_peer(connected):
+    """A conversation stays in one buffer even as the nickname changes."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "direct", "src": PEER, "nick": "alice", "body": "one"},
+        {"op": "direct", "src": PEER, "nick": "alice2", "body": "two"},
+    )
+    assert len(connection.dms) == 1
+    buffer = weechat.state.buffers[connection.dms[PEER]]
+    assert len(buffer.lines) == 2
+    assert buffer.properties["short_name"] == "alice2"
+
+
+def test_a_direct_message_without_a_nickname_uses_the_hash(connected):
+    """With no nickname, the private buffer is labelled by identity."""
+    weechat, rrc, connection, process = connected
+    deliver(rrc, connection, process, {"op": "direct", "src": PEER, "body": "hi"})
+    buffer = weechat.state.buffers[connection.dms[PEER]]
+    assert PEER[:8] + TAB + "hi" in buffer.lines
 
 
 # -- buffer input and closing ----------------------------------------------

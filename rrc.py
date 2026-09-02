@@ -56,6 +56,12 @@ PROBE = "import RNS, cbor2"
 #: Interpreters tried when ``helper.python`` is not configured, in order.
 FALLBACK_PYTHONS = ("python3", "~/.venv/bin/python")
 
+#: Marks a private-buffer callback payload, distinguishing it from a room.
+DM_PREFIX = "@"
+
+#: IRC verbs this script handles inside its own buffers (SPEC.md D3).
+INTERCEPTED = ("join", "part", "me", "msg", "query", "nick")
+
 #: Live connections, keyed by the short hub name shown in buffer names.
 connections: dict[str, "Connection"] = {}
 
@@ -170,11 +176,14 @@ class Connection:
         self.hub_hash = hub_hash
         self.nick = nick
         self.hub_name = ""
+        self.hub_identity = ""
         self.process: subprocess.Popen | None = None
         self.identity = ""
         self.lag = ""
         self.state = "disconnected"
         self.rooms: dict[str, str] = {}
+        self.members: dict[str, dict[str, str]] = {}
+        self.dms: dict[str, str] = {}
         self.hooks: list[str] = []
         self._reader = None
         self.buffer = weechat.buffer_new(
@@ -296,10 +305,110 @@ class Connection:
     def say(self, room: str, text: str) -> None:
         """Send *text* to *room*.
 
+        A leading ``//`` is WeeChat's escape for a line that should start with
+        a slash. One slash is stripped, so typing ``//who`` sends the literal
+        ``/who``, which hubs such as rrcd parse as a hub command. This is how
+        hub commands reach the hub without this script keeping a list of them.
+
         Nothing is echoed locally: the hub sends every message back to its
         author, so a local echo would show each line twice.
         """
+        if text.startswith("//"):
+            text = text[1:]
         self.send({"op": "say", "room": room, "text": text})
+
+    def direct(self, target: str, text: str) -> None:
+        """Send a direct message to *target*'s identity hash."""
+        self.send({"op": "direct", "target": target, "text": text})
+
+    def dm_buffer(self, identity: str) -> str:
+        """Return the private buffer for *identity*, creating it if needed.
+
+        Buffers are keyed by identity hash rather than nickname, because a
+        nickname is advisory and may change or collide mid-conversation.
+        """
+        if identity in self.dms:
+            return self.dms[identity]
+        pointer = weechat.buffer_new(
+            f"{SCRIPT_NAME}.{self.name}.{short(identity)}",
+            "rrc_input_cb",
+            f"{self.name}/{DM_PREFIX}{identity}",
+            "rrc_close_cb",
+            f"{self.name}/{DM_PREFIX}{identity}",
+        )
+        weechat.buffer_set(pointer, "short_name", self.label(identity))
+        weechat.buffer_set(pointer, "localvar_set_type", "private")
+        weechat.buffer_set(pointer, "localvar_set_server", self.name)
+        weechat.buffer_set(pointer, "title", f"direct messages with {identity}")
+        self.dms[identity] = pointer
+        return pointer
+
+    def label(self, identity: str) -> str:
+        """Return the best display name known for *identity*."""
+        for members in self.members.values():
+            nick = members.get(identity)
+            if nick:
+                return nick
+        return short(identity)
+
+    def note_member(self, room: str, identity: str, nick: str = "") -> None:
+        """Record that *identity* is in *room*, keeping any known nickname.
+
+        The hub itself is skipped. Hubs send room notices under their own
+        identity, and listing a hub as a member of the rooms it relays would be
+        wrong as well as confusing.
+        """
+        if not identity or identity == self.hub_identity:
+            return
+        members = self.members.setdefault(room, {})
+        members[identity] = nick or members.get(identity, "")
+        self.refresh_nicklist(room)
+
+    def drop_member(self, room: str, identity: str) -> None:
+        """Forget that *identity* is in *room*."""
+        self.members.get(room, {}).pop(identity, None)
+        self.refresh_nicklist(room)
+
+    def refresh_nicklist(self, room: str) -> None:
+        """Rebuild *room*'s nicklist from the members currently known."""
+        pointer = self.rooms.get(room)
+        if pointer is None:
+            return
+        weechat.nicklist_remove_all(pointer)
+        for identity, nick in sorted(
+            self.members.get(room, {}).items(), key=lambda item: item[1] or item[0]
+        ):
+            weechat.nicklist_add_nick(
+                pointer, "", nick or short(identity), "bar_fg", "", "bar_fg", 1
+            )
+
+    def resolve(self, token: str) -> str | None:
+        """Return the identity hash *token* refers to, or ``None``.
+
+        Accepts a full hash, a unique hash prefix, or a nickname seen in any
+        room. Ambiguous input returns ``None`` rather than guessing, because
+        guessing would send a private message to the wrong person.
+        """
+        candidate = token.strip().lower()
+        known = {i for members in self.members.values() for i in members}
+        known.update(self.dms)
+        if len(candidate) == 32:
+            return candidate
+        by_nick = {
+            identity
+            for members in self.members.values()
+            for identity, nick in members.items()
+            if nick.lower() == candidate
+        }
+        by_prefix = {i for i in known if i.startswith(candidate)}
+        matches = by_nick or by_prefix
+        if len(matches) == 1:
+            return matches.pop()
+        if len(matches) > 1:
+            self.display(f"{token} is ambiguous; use a full identity hash", "=!=")
+        else:
+            self.display(f"no one here is called {token}", "=!=")
+        return None
 
     # -- inbound events ---------------------------------------------------
 
@@ -341,6 +450,7 @@ class Connection:
 
     def _ev_welcome(self, event: dict) -> None:
         """Show the hub's greeting line once the session is open."""
+        self.hub_identity = clean(event.get("src"))
         self.hub_name = clean(event.get("hub"), "unnamed hub")
         version = clean(event.get("version"))
         suffix = f" ({version})" if version else ""
@@ -360,6 +470,9 @@ class Connection:
         room = clean(event.get("room"))
         buffer = self.room_buffer(room)
         members = event.get("members") or []
+        self.members[room] = {}
+        for identity in members:
+            self.note_member(room, clean(identity))
         weechat.prnt(buffer, f"--\tjoined {room} ({len(members)} present)")
 
     def _ev_parted(self, event: dict) -> None:
@@ -367,13 +480,20 @@ class Connection:
         room = clean(event.get("room"))
         if room in self.rooms:
             weechat.prnt(self.rooms[room], f"--\tleft {room}")
+        self.members.pop(room, None)
 
     def _ev_join(self, event: dict) -> None:
         """Report somebody else arriving in a room."""
         room = clean(event.get("room"))
         for member in event.get("members") or []:
-            name = clean(event.get("nick")) or short(member)
-            weechat.prnt(self.room_buffer(room), f"-->\t{name} joined {room}")
+            identity = clean(member)
+            nick = clean(event.get("nick"))
+            self.room_buffer(room)
+            self.note_member(room, identity, nick)
+            weechat.prnt(
+                self.room_buffer(room),
+                f"-->\t{nick or short(identity)} joined {room}",
+            )
 
     def _ev_part(self, event: dict) -> None:
         """Report somebody else leaving a room."""
@@ -381,12 +501,19 @@ class Connection:
         if room not in self.rooms:
             return
         for member in event.get("members") or []:
-            name = clean(event.get("nick")) or short(member)
+            identity = clean(member)
+            name = clean(event.get("nick")) or short(identity)
             weechat.prnt(self.rooms[room], f"<--\t{name} left {room}")
+            self.drop_member(room, identity)
 
     def _ev_chat(self, event: dict) -> None:
         """Render room content, or a hub-wide notice with no room."""
         room = event.get("room")
+        if room:
+            self.room_buffer(clean(room))
+            self.note_member(
+                clean(room), clean(event.get("src")), clean(event.get("nick"))
+            )
         target = self.room_buffer(clean(room)) if room else self.buffer
         body = clean(event.get("body"))
         name = speaker(event)
@@ -399,8 +526,13 @@ class Connection:
             weechat.prnt(target, f"{name}\t{body}")
 
     def _ev_direct(self, event: dict) -> None:
-        """Show a direct message on the server buffer for now."""
-        self.display(f"{speaker(event)}: {clean(event.get('body'))}", "DM")
+        """Show a direct message in a private buffer for its sender."""
+        identity = clean(event.get("src"))
+        buffer = self.dm_buffer(identity)
+        nick = clean(event.get("nick"))
+        if nick:
+            weechat.buffer_set(buffer, "short_name", nick)
+        weechat.prnt(buffer, f"{nick or short(identity)}\t{clean(event.get('body'))}")
 
     def _ev_pong(self, event: dict) -> None:
         """Record the measured round-trip time."""
@@ -460,6 +592,9 @@ def find_connection(buffer: str) -> tuple["Connection | None", str]:
         for room, pointer in connection.rooms.items():
             if buffer == pointer:
                 return connection, room
+        for identity, pointer in connection.dms.items():
+            if buffer == pointer:
+                return connection, DM_PREFIX + identity
     return None, ""
 
 
@@ -513,30 +648,130 @@ def _read_available(stream) -> bytes:
 
 def rrc_input_cb(data: str, buffer: str, text: str) -> int:
     """Send a line typed in a room buffer to that room."""
-    name, _, room = data.partition("/")
+    name, _, target = data.partition("/")
     connection = connections.get(name)
     if connection is None:
         return weechat.WEECHAT_RC_OK
-    if not room:
+    if not target:
         connection.display("this is the hub buffer; type in a room buffer", "=!=")
         return weechat.WEECHAT_RC_OK
-    connection.say(room, text)
+    if target.startswith(DM_PREFIX):
+        connection.direct(target[len(DM_PREFIX) :], text)
+        weechat.prnt(
+            connection.dms[target[len(DM_PREFIX) :]],
+            f"{connection.nick or 'you'}\t{text}",
+        )
+        return weechat.WEECHAT_RC_OK
+    connection.say(target, text)
     return weechat.WEECHAT_RC_OK
 
 
 def rrc_close_cb(data: str, buffer: str) -> int:
     """Part the room, or disconnect entirely, when a buffer is closed."""
-    name, _, room = data.partition("/")
+    name, _, target = data.partition("/")
     connection = connections.get(name)
     if connection is None:
         return weechat.WEECHAT_RC_OK
-    if room:
-        connection.rooms.pop(room, None)
-        connection.send({"op": "part", "room": room})
+    if target.startswith(DM_PREFIX):
+        connection.dms.pop(target[len(DM_PREFIX) :], None)
+    elif target:
+        connection.rooms.pop(target, None)
+        connection.members.pop(target, None)
+        connection.send({"op": "part", "room": target})
     else:
         connection.stop()
         connections.pop(name, None)
     return weechat.WEECHAT_RC_OK
+
+
+def rrc_run_cb(data: str, buffer: str, command: str) -> int:
+    """Handle an IRC verb typed inside one of this script's buffers.
+
+    Buffer ownership is checked with :func:`find_connection`, not the
+    single-connection fallback: these hooks fire for every ``/join`` anywhere in
+    WeeChat, so anything that is not ours must pass through untouched or the
+    irc plugin would stop working.
+    """
+    connection, target = find_connection(buffer)
+    if connection is None:
+        return weechat.WEECHAT_RC_OK
+    verb, _, rest = command.strip().partition(" ")
+    handler = {
+        "/join": _run_join,
+        "/part": _run_part,
+        "/me": _run_me,
+        "/msg": _run_msg,
+        "/query": _run_query,
+        "/nick": _run_nick,
+    }.get(verb.lower())
+    if handler is None:  # pragma: no cover - only hooked verbs reach here
+        return weechat.WEECHAT_RC_OK
+    handler(connection, target, rest.strip())
+    return weechat.WEECHAT_RC_OK_EAT
+
+
+def _room_of(target: str) -> str:
+    """Return *target* if it names a room, else an empty string."""
+    return "" if target.startswith(DM_PREFIX) else target
+
+
+def _run_join(connection: "Connection", target: str, rest: str) -> None:
+    """``/join #room`` enters a room."""
+    if not rest:
+        connection.display("usage: /join <#room>", "=!=")
+        return
+    connection.send({"op": "join", "room": rest.split()[0]})
+
+
+def _run_part(connection: "Connection", target: str, rest: str) -> None:
+    """``/part [#room]`` leaves a room, defaulting to the current one."""
+    room = rest.split()[0] if rest else _room_of(target)
+    if not room:
+        connection.display("usage: /part <#room>", "=!=")
+        return
+    connection.send({"op": "part", "room": room})
+
+
+def _run_me(connection: "Connection", target: str, rest: str) -> None:
+    """``/me does a thing`` sends an ACTION to the current room."""
+    room = _room_of(target)
+    if not room:
+        connection.display("/me works in a room buffer", "=!=")
+        return
+    connection.send({"op": "say", "room": room, "text": rest, "kind": "action"})
+
+
+def _run_msg(connection: "Connection", target: str, rest: str) -> None:
+    """``/msg <target> <text>`` sends one direct message."""
+    recipient, _, text = rest.partition(" ")
+    if not recipient or not text.strip():
+        connection.display("usage: /msg <nick|hash> <message>", "=!=")
+        return
+    identity = connection.resolve(recipient)
+    if identity is not None:
+        connection.direct(identity, text.strip())
+
+
+def _run_query(connection: "Connection", target: str, rest: str) -> None:
+    """``/query <target> [text]`` opens a private buffer, optionally sending."""
+    recipient, _, text = rest.partition(" ")
+    if not recipient:
+        connection.display("usage: /query <nick|hash> [message]", "=!=")
+        return
+    identity = connection.resolve(recipient)
+    if identity is None:
+        return
+    connection.dm_buffer(identity)
+    if text.strip():
+        connection.direct(identity, text.strip())
+
+
+def _run_nick(connection: "Connection", target: str, rest: str) -> None:
+    """``/nick <nickname>`` changes the advisory nickname."""
+    if not rest:
+        connection.display("usage: /nick <nickname>", "=!=")
+        return
+    connection.send({"op": "nick", "nick": rest.split()[0]})
 
 
 def rrc_command_cb(data: str, buffer: str, args: str) -> int:
@@ -721,12 +956,20 @@ def main() -> None:
         "      part: leave a room, defaulting to the current one\n"
         "      nick: change the advisory nickname\n"
         "      ping: measure round-trip time to the hub\n\n"
+        "Inside a room buffer the familiar IRC verbs work as well: /join,\n"
+        "/part, /me, /msg, /query and /nick. They are left alone everywhere\n"
+        "else, so the irc plugin is unaffected.\n\n"
+        "To send a hub command such as /who or /topic, double the slash:\n"
+        "typing //who sends the literal /who to the hub, which interprets it.\n"
+        "Hub commands differ between hubs, so none are assumed here.\n\n"
         "A running Reticulum shared instance is assumed; this script never\n"
         "reads or writes your Reticulum configuration.",
         "connect || disconnect || list || status || join || part || nick || ping",
         "rrc_command_cb",
         "",
     )
+    for verb in INTERCEPTED:
+        weechat.hook_command_run(f"/{verb}", "rrc_run_cb", "")
 
 
 if __name__ == "__main__":
