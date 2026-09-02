@@ -36,14 +36,14 @@ jobs:
       - name: API docs 100% (ACCEPTANCE B3)
         run: python .github/scripts/check_docstrings.py
 
-  licence:
+  license:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: SPDX tags and notices (ACCEPTANCE B4)
-        run: make licence | tee /tmp/licence.log
+        run: make license | tee /tmp/license.log
       - name: Fail on any missing header
-        run: "! grep -q MISSING /tmp/licence.log"
+        run: "! grep -q MISSING /tmp/license.log"
 
   e2e:
     runs-on: ubuntu-latest

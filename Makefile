@@ -5,7 +5,7 @@
 #   make test PYTHON=/path/to/python
 PYTHON ?= $(if $(RRC_PYTHON),$(RRC_PYTHON),python3)
 
-.PHONY: help test coverage fmt fmt-check docs licence check e2e clean
+.PHONY: help test coverage fmt fmt-check docs license check e2e clean
 
 help:  ## Show available targets
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -27,7 +27,7 @@ fmt-check:  ## Verify formatting (ACCEPTANCE B5)
 docs:  ## Verify 100% API-doc coverage (ACCEPTANCE B3)
 	$(PYTHON) .github/scripts/check_docstrings.py
 
-licence:  ## Verify SPDX tags and notices on tracked files (ACCEPTANCE B4)
+license:  ## Verify SPDX tags and notices on tracked files (ACCEPTANCE B4)
 	@for f in $$(git ls-files); do \
 		[ "$$f" = LICENSE ] && continue; \
 		grep -Iq . "$$f" || continue; \
@@ -35,9 +35,9 @@ licence:  ## Verify SPDX tags and notices on tracked files (ACCEPTANCE B4)
 			|| echo "MISSING SPDX: $$f"; \
 		case "$$f" in *.py) grep -qF 'Licensed under the Apache License, Version 2.0' \
 			"$$f" || echo "MISSING NOTICE: $$f";; esac; \
-	done; echo "licence headers checked"
+	done; echo "license headers checked"
 
-check: fmt-check test coverage docs licence  ## Everything that gates a change
+check: fmt-check test coverage docs license  ## Everything that gates a change
 
 e2e:  ## End-to-end against a local rrcd hub (ACCEPTANCE A1)
 	$(PYTHON) -m pytest -q tests/test_e2e.py -rs -s
