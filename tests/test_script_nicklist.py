@@ -256,3 +256,54 @@ def test_a_member_with_no_identity_is_not_listed(connected):
     )
     connection.note_member("#general", "")
     assert nicks(weechat, connection, "#general") == {ALICE[:8]}
+
+
+def test_a_repeated_join_is_announced_once(connected):
+    """A hub may announce the same arrival twice; the room shows it once.
+
+    Observed against a public hub when a client reconnected within two
+    seconds: the same "joined" line was rendered twice at the same timestamp.
+    """
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": []},
+        {"op": "join", "room": "#general", "members": [BOB], "nick": "bob"},
+        {"op": "join", "room": "#general", "members": [BOB], "nick": "bob"},
+    )
+    text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
+    assert text.count("bob joined") == 1
+    assert nicks(weechat, connection, "#general") == {"bob"}
+
+
+def test_a_repeated_part_is_announced_once(connected):
+    """A departure for somebody already gone is not announced again."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [BOB]},
+        {"op": "part", "room": "#general", "members": [BOB], "nick": "bob"},
+        {"op": "part", "room": "#general", "members": [BOB], "nick": "bob"},
+    )
+    text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
+    assert text.count("left") == 1
+
+
+def test_a_rejoin_after_a_part_is_announced(connected):
+    """Somebody who genuinely left and came back is announced again."""
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": [BOB]},
+        {"op": "part", "room": "#general", "members": [BOB], "nick": "bob"},
+        {"op": "join", "room": "#general", "members": [BOB], "nick": "bob"},
+    )
+    text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
+    assert text.count("bob joined") == 1
+    assert text.count("left") == 1

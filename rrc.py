@@ -568,8 +568,14 @@ class Connection:
         for member in event.get("members") or []:
             identity = clean(member)
             nick = clean(event.get("nick"))
+            # A hub may announce the same arrival more than once, for instance
+            # when a client reconnects quickly. Announcing somebody already in
+            # the nicklist is noise, so update what is known and stay quiet.
+            already_present = identity in self.members.get(room, {})
             self.room_buffer(room)
             self.note_member(room, identity, nick)
+            if already_present:
+                continue
             weechat.prnt(
                 self.room_buffer(room),
                 f"-->\t{nick or short(identity)} joined {room}",
@@ -582,6 +588,9 @@ class Connection:
             return
         for member in event.get("members") or []:
             identity = clean(member)
+            # Likewise, only announce a departure for somebody we still list.
+            if identity not in self.members.get(room, {}):
+                continue
             name = clean(event.get("nick")) or short(identity)
             weechat.prnt(self.rooms[room], f"<--\t{name} left {room}")
             self.drop_member(room, identity)
