@@ -56,7 +56,40 @@ jobs:
         run: pip install rns cbor2 tomlkit pytest
       - name: Fetch the reference hub
         run: git clone --depth 1 https://github.com/kc1awv/rrcd /tmp/rrcd
+      - name: Configure Reticulum for a single host
+        # The hub and the clients must share one Reticulum instance to reach
+        # each other. Reticulum's default config offers only AutoInterface,
+        # which needs link-local IPv6 multicast that CI containers do not
+        # have, so the processes come up isolated and every connect fails
+        # with "no path". Forcing the shared instance onto localhost TCP
+        # needs no interface at all: the first process to start becomes the
+        # instance and the others attach to it.
+        run: |
+          mkdir -p ~/.reticulum
+          cat > ~/.reticulum/config <<'CONFIG'
+          [reticulum]
+            enable_transport = No
+            share_instance = Yes
+            shared_instance_type = tcp
+            shared_instance_port = 37500
+            instance_control_port = 37501
+            instance_name = e2eci
+
+          [logging]
+            loglevel = 4
+
+          [interfaces]
+
+            [[Default Interface]]
+              type = AutoInterface
+              enabled = No
+          CONFIG
+          sed -i 's/^          //' ~/.reticulum/config
+          cat ~/.reticulum/config
       - name: End-to-end against a real rrcd hub (ACCEPTANCE A1)
         env:
           RRCD_PATH: /tmp/rrcd
         run: make e2e PYTHON=python
+      - name: Hub log on failure
+        if: failure()
+        run: find /tmp -name 'rrcd.log' -exec tail -n 60 {} + || true
