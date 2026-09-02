@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import pathlib
 import sys
 
@@ -125,3 +127,99 @@ def ready():
     h.session.start()
     h.welcome()
     return h
+
+
+class FakeProcess:
+    """A stand-in for the helper subprocess, backed by real pipes.
+
+    Real pipes are used for stdout and stderr so the script's non-blocking
+    ``os.read`` path is exercised rather than mocked away.
+    """
+
+    def __init__(self):
+        """Open pipes and start with an empty command log."""
+        self.written = []
+        self.killed = False
+        self.closed = False
+        self._out_r, self._out_w = os.pipe()
+        self._err_r, self._err_w = os.pipe()
+        self.stdout = os.fdopen(self._out_r, "rb", buffering=0)
+        self.stderr = os.fdopen(self._err_r, "rb", buffering=0)
+        self.stdin = self
+
+    def write(self, data):
+        """Record a command frame written by the script."""
+        if self.closed:
+            raise ValueError("stdin is closed")
+        self.written.append(json.loads(data))
+        return len(data)
+
+    def flush(self):
+        """Accept the script's flush; nothing is buffered here."""
+
+    def close(self):
+        """Mark stdin closed, as the real pipe would be."""
+        self.closed = True
+
+    def emit(self, *events):
+        """Push events onto the helper's stdout pipe."""
+        for event in events:
+            os.write(self._out_w, (json.dumps(event) + "\n").encode())
+
+    def emit_stderr(self, text):
+        """Push a diagnostic line onto the helper's stderr pipe."""
+        os.write(self._err_w, text.encode())
+
+    def wait(self, timeout=None):
+        """Report immediate, clean exit."""
+        return 0
+
+    def kill(self):
+        """Record that the process was killed."""
+        self.killed = True
+
+    def cleanup(self):
+        """Close every descriptor so no warning escapes the test."""
+        for closer in (self.stdout.close, self.stderr.close):
+            try:
+                closer()
+            except OSError:  # pragma: no cover - already closed
+                pass
+        for fd in (self._out_w, self._err_w):
+            try:
+                os.close(fd)
+            except OSError:  # pragma: no cover - already closed
+                pass
+
+
+@pytest.fixture
+def wee(monkeypatch):
+    """Import the WeeChat script against the fake API and yield both.
+
+    Returns a ``(weechat, rrc)`` pair. The script module is reloaded per test so
+    module-level state cannot leak between them.
+    """
+    from tests import fake_weechat
+
+    fake_weechat.state.reset()
+    monkeypatch.setitem(sys.modules, "weechat", fake_weechat)
+    sys.modules.pop("rrc", None)
+    import rrc
+
+    rrc.connections.clear()
+    yield fake_weechat, rrc
+    rrc.connections.clear()
+    sys.modules.pop("rrc", None)
+
+
+@pytest.fixture
+def connected(wee, monkeypatch):
+    """Return ``(weechat, rrc, connection, process)`` with a started helper."""
+    fake_weechat, rrc = wee
+    process = FakeProcess()
+    monkeypatch.setattr(rrc, "find_python", lambda: "/usr/bin/python3")
+    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: process)
+    rrc.rrc_command_cb("", "", "connect 28c7c1a68c735693aa8e6b8193ed44b2 -nick afri")
+    connection = rrc.connections["28c7c1a6"]
+    yield fake_weechat, rrc, connection, process
+    process.cleanup()
