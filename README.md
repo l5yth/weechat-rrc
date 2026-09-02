@@ -58,6 +58,16 @@ ln -sf ../rrc.py ~/.local/share/weechat/python/autoload/rrc.py
 /rrc connect <hub-hash>
 ```
 
+## Example
+
+Join the general channel of the RNS Community hub:
+
+```
+/rrc connect 28c7c1a68c735693aa8e6b8193ed44b2 -nick weechatter
+/join general
+//who
+```
+
 ## Commands
 
 | Command | Effect |
