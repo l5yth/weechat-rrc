@@ -385,3 +385,35 @@ def test_ambiguous_commands_ask_for_a_connection(connected, monkeypatch, command
         assert rrc.rrc_command_cb("", other, command) == weechat.WEECHAT_RC_ERROR
     finally:
         second.cleanup()
+
+
+def test_unload_after_the_helper_died_does_not_raise(connected):
+    """Stopping a connection whose pipe already broke must not raise.
+
+    ``send`` clears ``self.process`` when the pipe is gone, so a ``stop`` that
+    reached for ``self.process.stdin`` afterwards raised ``AttributeError``
+    outside the caught tuple. In WeeChat that surfaced as
+    `error in function "rrc_unload_cb"` with a traceback on every ``/quit``
+    after the helper had died.
+    """
+    weechat, rrc, connection, process = connected
+
+    def broken(data):
+        raise OSError("broken pipe")
+
+    monkey = process.write
+    process.write = broken
+    try:
+        connection.stop()  # must not raise
+    finally:
+        process.write = monkey
+    assert connection.process is None
+    assert connection.state == "disconnected"
+
+
+def test_stopping_a_process_without_stdin_is_safe(connected):
+    """A process whose stdin was already closed elsewhere is torn down cleanly."""
+    weechat, rrc, connection, process = connected
+    process.stdin = None
+    connection.stop()
+    assert connection.process is None

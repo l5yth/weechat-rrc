@@ -195,14 +195,37 @@ def connected(helper):
     return helper
 
 
-def test_on_up_sends_hello_and_autojoins(helper):
-    """Rooms are rejoined only after the Link is up, never before."""
+def test_autojoin_waits_for_welcome(helper):
+    """Rooms are joined after WELCOME, never on HELLO alone.
+
+    2-RRC lets a hub answer anything sent before it has accepted the session
+    with an error instead of acting on it; rrcd's router does exactly that.
+    """
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+
     helper.handle({"op": "connect", "hub": HUB, "autojoin": ["#general", 42]})
-    assert FakeHubLink.created[0].sent == []
+    link = FakeHubLink.created[0]
+    assert link.sent == []
+
     helper._on_up()
     assert ops(helper, "state")[-1]["state"] == "up"
-    # HELLO plus one JOIN; the non-string autojoin entry was discarded.
-    assert len(FakeHubLink.created[0].sent) == 2
+    # Only HELLO so far: joining now could be refused by the hub.
+    assert len(link.sent) == 1
+    assert E.decode(link.sent[0]).type == C.T_HELLO
+
+    helper.session.on_frame(E.encode(C.T_WELCOME, src=bytes.fromhex(PEER), body={}))
+    # One JOIN; the non-string autojoin entry was discarded.
+    assert len(link.sent) == 2
+    assert E.decode(link.sent[1]).type == C.T_JOIN
+    assert E.decode(link.sent[1]).room == "#general"
+
+
+def test_autojoin_after_welcome_without_a_session_is_safe(helper):
+    """A disconnect racing the WELCOME callback must not raise."""
+    helper.handle({"op": "connect", "hub": HUB, "autojoin": ["#general"]})
+    helper.session = None
+    helper._join_autojoin()
 
 
 def test_say_join_part_reach_the_link(connected):

@@ -120,16 +120,22 @@ def set_nonblocking(stream) -> None:
     fcntl.fcntl(descriptor, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
 
+#: Directory this script was loaded from, captured while the module executes.
+#: WeeChat removes ``__file__`` from a script's globals before any callback
+#: runs, so reading it later yields ``None`` and the helper would be looked for
+#: in the wrong place. Verified against WeeChat 4.10.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ""
+
+
 def helper_directory() -> str:
     """Return the directory containing the ``rrc_helper`` package.
 
-    The helper lives beside this script. ``__file__`` is set when WeeChat loads
-    a script, but falling back to the WeeChat data directory keeps the script
-    working if that ever stops being true.
+    The helper lives beside this script, so :data:`SCRIPT_DIR` is used when it
+    is known. The WeeChat data directory is the fallback for the case where the
+    script was executed without a file path.
     """
-    here = globals().get("__file__")
-    if here:
-        return os.path.dirname(os.path.abspath(here))
+    if SCRIPT_DIR:
+        return SCRIPT_DIR
     return os.path.join(weechat.info_get("weechat_dir", ""), "python")
 
 
@@ -253,14 +259,18 @@ class Connection:
         for hook in self.hooks:
             weechat.unhook(hook)
         self.hooks = []
-        if self.process is not None:
+        process = self.process
+        if process is not None:
+            # send() clears self.process when the pipe is already broken, so
+            # the local reference is what the teardown below must use.
             self.send({"op": "quit"})
-            try:
-                self.process.stdin.close()
-                self.process.wait(timeout=5)
-            except (OSError, ValueError, subprocess.TimeoutExpired):
-                self.process.kill()
             self.process = None
+            try:
+                if process.stdin is not None:
+                    process.stdin.close()
+                process.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                process.kill()
         self.state = "disconnected"
 
     def send(self, command: dict) -> None:

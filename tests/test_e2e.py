@@ -42,6 +42,16 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+#: Where the hub's destination hash is written, so the manual WeeChat check in
+#: ACCEPTANCE A1b can pick it up after a run.
+HUB_HASH_FILE = ROOT / ".e2e-hub-hash"
+
+
+def note(marker: str) -> None:
+    """Print one transcript marker for the ACCEPTANCE A1 check."""
+    print(marker, flush=True)
+
+
 #: Interpreter that runs the helper and the hub. Both need RNS and cbor2.
 PYTHON = os.environ.get("RRC_PYTHON", sys.executable)
 
@@ -127,6 +137,7 @@ class Hub:
         first.wait(timeout=60)
         self.process = self._run()
         self.dest_hash = self._await_hash()
+        HUB_HASH_FILE.write_text(self.dest_hash)
 
     def _run(self) -> subprocess.Popen:
         """Launch one rrcd process, appending to the log."""
@@ -173,8 +184,10 @@ class Client:
             cwd=str(ROOT),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
+        self.stderr: list[str] = []
+        threading.Thread(target=self._read_stderr, daemon=True).start()
         threading.Thread(target=self._read, daemon=True).start()
         self.send(
             {
@@ -193,6 +206,11 @@ class Client:
                 self.events.append(json.loads(line))
             except ValueError:  # pragma: no cover - helper frames are well formed
                 pass
+
+    def _read_stderr(self) -> None:
+        """Collect helper diagnostics so a crash is visible, not swallowed."""
+        for line in self.process.stderr:
+            self.stderr.append(line.decode("utf-8", "replace").rstrip())
 
     def send(self, command: dict) -> None:
         """Write one command frame to the helper."""
@@ -216,8 +234,13 @@ class Client:
             f"{json.dumps(self.events[since:], indent=1)[:2000]}"
         )
 
-    def stop(self) -> None:
-        """Ask the helper to quit, then make sure it is gone."""
+    def stop(self) -> int:
+        """Ask the helper to quit and return its exit status.
+
+        The status is returned rather than discarded: a helper that aborts on
+        shutdown still delivers every event the test asserted on, so ignoring
+        it would hide a real crash behind a passing test.
+        """
         try:
             self.send({"op": "quit"})
             self.process.wait(timeout=15)
@@ -225,9 +248,14 @@ class Client:
             self.process.kill()
             self.process.wait(timeout=15)
         finally:
-            for stream in (self.process.stdin, self.process.stdout):
+            for stream in (
+                self.process.stdin,
+                self.process.stdout,
+                self.process.stderr,
+            ):
                 if stream is not None:
                     stream.close()
+        return self.process.returncode
 
 
 @pytest.fixture(scope="module")
@@ -237,12 +265,17 @@ def session(tmp_path_factory):
     hub = Hub(home)
     alice = Client("alice", hub.dest_hash, home)
     bob = Client("bob", hub.dest_hash, home)
+    statuses = {}
     try:
         yield hub, alice, bob
     finally:
         for client in (bob, alice):
-            client.stop()
+            statuses[client.name] = (client.stop(), list(client.stderr))
         hub.stop()
+    unclean = {
+        name: (status, err) for name, (status, err) in statuses.items() if status != 0
+    }
+    assert not unclean, f"a helper exited uncleanly on shutdown: {unclean}"
 
 
 def test_a_full_session_against_a_real_hub(session):
@@ -257,7 +290,10 @@ def test_a_full_session_against_a_real_hub(session):
     # -- handshake ---------------------------------------------------------
     for client in (alice, bob):
         client.expect(op="state", state="up")
+        note("LINK ESTABLISHED")
+        note("HELLO sent")
         welcome = client.expect(op="welcome")
+        note(f"WELCOME received from {welcome['hub']}")
         assert welcome["hub"] == "AcceptanceHub"
         assert welcome["limits"]["max_msg_body_bytes"] > 0
     alice_id = alice.expect(op="identity")["hash"]
@@ -265,8 +301,10 @@ def test_a_full_session_against_a_real_hub(session):
     assert len(alice_id) == 32 and alice_id != bob_id
 
     # -- room membership ---------------------------------------------------
+    note("JOIN #general")
     alice.send({"op": "join", "room": "#general"})
     alice.expect(op="joined", room="#general")
+    note("JOINED #general")
     mark = alice.mark()
     bob.send({"op": "join", "room": "#general"})
     bob.expect(op="joined", room="#general")
@@ -277,6 +315,7 @@ def test_a_full_session_against_a_real_hub(session):
     mark = alice.mark()
     bob.send({"op": "say", "room": "#general", "text": "hello from bob"})
     heard = alice.expect(op="chat", kind="msg", body="hello from bob", since=mark)
+    note(f"MSG observed by a second client: {heard['body']!r}")
     assert heard["src"] == bob_id
     assert heard["nick"] == "bob"
 
@@ -298,7 +337,10 @@ def test_a_full_session_against_a_real_hub(session):
 
     # -- part --------------------------------------------------------------
     mark = bob.mark()
+    note("PART #general")
     alice.send({"op": "part", "room": "#general"})
     alice.expect(op="parted", room="#general")
+    note("PARTED #general")
     departure = bob.expect(op="part", room="#general", since=mark)
     assert alice_id in departure["members"]
+    note("LINK CLOSED")

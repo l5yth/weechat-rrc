@@ -162,3 +162,43 @@ def test_reader_round_trips_encoded_frames():
     sent = [{"op": "join", "room": "#general"}, {"op": "msg", "body": "hi"}]
     stream = b"".join(ipc.encode_frame(f) for f in sent)
     assert ipc.FrameReader().feed(stream) == sent
+
+
+def test_no_key_material_leaves_the_helper(tmp_path):
+    """No IPC frame may contain bytes from the identity's private key.
+
+    The helper holds the private key; the WeeChat script must never see it.
+    A session is driven end to end and every emitted frame is searched for any
+    slice of the key material.
+    """
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+    from rrc_helper import identity as identity_store
+    from rrc_helper.session import RRCSession
+
+    identity = identity_store.create(tmp_path / "identity")
+    secret = identity.get_private_key()
+    assert len(secret) >= 32
+
+    frames = []
+    session = RRCSession(
+        identity.hash, send=lambda raw: None, emit=frames.append, nick="afri"
+    )
+    session.start()
+    session.on_frame(
+        E.encode(C.T_WELCOME, src=b"\x22" * 16, body={C.B_WELCOME_HUB: "Hub"})
+    )
+    session.join("#general")
+    session.on_frame(
+        E.encode(C.T_JOINED, src=b"\x22" * 16, room="#general", body=[identity.hash])
+    )
+    session.say("#general", "hello")
+    session.ping()
+    session.on_link_down()
+
+    stream = b"".join(ipc.encode_frame(f) for f in frames)
+    assert frames, "the session emitted nothing, so this test proved nothing"
+    for start in range(0, len(secret) - 15):
+        window = secret[start : start + 16]
+        assert window not in stream
+        assert window.hex().encode() not in stream

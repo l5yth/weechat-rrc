@@ -134,8 +134,21 @@ def test_helper_directory_sits_beside_the_script(wee):
     assert rrc.helper_directory().endswith("weechat-rrc")
 
 
-def test_helper_directory_falls_back_to_the_weechat_directory(wee, monkeypatch):
-    """Without ``__file__``, the WeeChat data directory is used."""
+def test_script_dir_is_captured_at_load_time(wee, monkeypatch):
+    """The path must survive WeeChat clearing ``__file__``.
+
+    WeeChat removes ``__file__`` from a script's globals before any callback
+    runs. Reading it at connect time yielded ``None``, so the helper was looked
+    for in the WeeChat data directory and ``/rrc connect`` failed with
+    "No module named rrc_helper" for any other install layout.
+    """
     _, rrc = wee
-    monkeypatch.delitem(rrc.__dict__, "__file__")
+    monkeypatch.delitem(rrc.__dict__, "__file__", raising=False)
+    assert rrc.helper_directory().endswith("weechat-rrc")
+
+
+def test_helper_directory_falls_back_to_the_weechat_directory(wee, monkeypatch):
+    """With no script path at all, the WeeChat data directory is used."""
+    _, rrc = wee
+    monkeypatch.setattr(rrc, "SCRIPT_DIR", "")
     assert rrc.helper_directory() == "/home/user/.config/weechat/python"

@@ -437,3 +437,74 @@ def test_closing_an_unknown_connection_is_ignored(connected):
     """A close callback for a gone connection returns cleanly."""
     weechat, rrc, connection, process = connected
     assert rrc.rrc_close_cb("gone", "0x0") == weechat.WEECHAT_RC_OK
+
+
+def test_room_buffers_survive_a_link_outage(connected):
+    """Buffers and scrollback persist across a reconnect (ACCEPTANCE C5).
+
+    RRC replays nothing, so anything already on screen is all the user has;
+    tearing the buffer down on a dropped Link would discard it.
+    """
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#general", "members": []},
+        {
+            "op": "chat",
+            "kind": "msg",
+            "room": "#general",
+            "src": PEER,
+            "nick": "bob",
+            "body": "said before the outage",
+        },
+    )
+    buffer = connection.rooms["#general"]
+    before = list(weechat.state.buffers[buffer].lines)
+
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "state", "state": "down", "reason": "link timed out"},
+        {"op": "reconnect", "seconds": 10.0},
+        {"op": "state", "state": "up"},
+    )
+    assert connection.rooms.get("#general") == buffer, "the room buffer was closed"
+    assert weechat.state.buffers[buffer].lines[: len(before)] == before
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "line one" + chr(10) + "forged second line",
+        "colour " + chr(25) + "F31 code",
+        "attribute " + chr(26) + "*bold",
+        "reset " + chr(28) + " here",
+    ],
+)
+def test_newlines_and_weechat_colour_codes_are_stripped(connected, hostile):
+    """Hub text cannot inject newlines or WeeChat's own formatting bytes.
+
+    WeeChat reads 0x19, 0x1A, 0x1B and 0x1C as colour and attribute markers, so
+    a hub could otherwise recolour or restyle a line it did not own.
+    """
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {
+            "op": "chat",
+            "kind": "msg",
+            "room": "#general",
+            "src": PEER,
+            "nick": "bob",
+            "body": hostile,
+        },
+    )
+    rendered = raw_lines(weechat, connection.rooms["#general"])
+    assert len(rendered) == 1, "a newline forged an extra buffer line"
+    for code in (10, 25, 26, 27, 28):
+        assert chr(code) not in rendered[0]

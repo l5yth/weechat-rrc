@@ -114,6 +114,7 @@ class RRCSession:
         emit: Callable[[dict[str, Any]], None],
         nick: str | None = None,
         clock: Callable[[], float] = time.monotonic,
+        on_ready: Callable[[], None] | None = None,
     ) -> None:
         """Create a session in its pre-``HELLO`` state.
 
@@ -123,6 +124,9 @@ class RRCSession:
             emit: Called with each event destined for WeeChat.
             nick: Advisory nickname, or ``None`` to send none.
             clock: Monotonic time source, injectable for tests.
+            on_ready: Called once ``WELCOME`` has been accepted. Room joins
+                must wait for it: 2-RRC allows a hub to answer anything sent
+                before ``WELCOME`` with an error instead of acting on it.
         """
         self.identity_hash = identity_hash
         self.nick = nick
@@ -138,6 +142,7 @@ class RRCSession:
         self._pending_parts: set[str] = set()
         self._ping_sent: dict[bytes, float] = {}
         self._sent_times: deque[float] = deque()
+        self._on_ready = on_ready
 
     # -- outbound ---------------------------------------------------------
 
@@ -302,6 +307,8 @@ class RRCSession:
                 "limits": self.limits.as_dict(),
             }
         )
+        if self._on_ready is not None:
+            self._on_ready()
 
     def _on_joined(self, env: E.Envelope) -> None:
         """Confirm our own join, or report someone else arriving."""

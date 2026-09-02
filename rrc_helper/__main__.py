@@ -145,6 +145,7 @@ class Helper:
             send=self._send,
             emit=self.emit,
             nick=cmd.get("nick"),
+            on_ready=self._join_autojoin,
         )
         self.emit({"op": "identity", "hash": self.identity.hash.hex()})
         self._open_link()
@@ -232,13 +233,24 @@ class Helper:
             self.fail(str(exc))
 
     def _on_up(self) -> None:
-        """Announce ourselves and rejoin the rooms we were configured for."""
+        """Announce ourselves once the Link is up.
+
+        Only ``HELLO`` is sent here. Rooms are joined from
+        :meth:`_join_autojoin`, which runs when ``WELCOME`` arrives, because a
+        hub may reject anything sent before it has accepted the session.
+        """
         self.backoff.reset()
         self.emit({"op": "state", "state": "up"})
         session = self.session
         if session is None:  # pragma: no cover - disconnect raced the callback
             return
         session.start()
+
+    def _join_autojoin(self) -> None:
+        """Join the configured rooms, once the hub has sent ``WELCOME``."""
+        session = self.session
+        if session is None:  # pragma: no cover - disconnect raced the callback
+            return
         for room in self.autojoin:
             session.join(room)
 
@@ -333,4 +345,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # The stdin reader is a daemon thread that may be blocked inside a read
+    # when the loop ends. Normal interpreter shutdown then tries to close that
+    # buffer, cannot take its lock, and aborts with a fatal error. Leaving via
+    # os._exit skips that teardown; there is nothing left to flush, because the
+    # IPC stream is unbuffered.
+    os._exit(main())
