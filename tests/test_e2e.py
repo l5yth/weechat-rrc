@@ -133,6 +133,12 @@ class Hub:
             str(home / "rooms.toml"),
             "--hub-name",
             "AcceptanceHub",
+            # Announce often. A client that attaches after the hub's single
+            # startup announce has no cheap way to learn the path and waits out
+            # a full discovery timeout; repeated announces close that race,
+            # which is what made this test flaky rather than any timeout.
+            "--announce-period",
+            "5",
             "--include-joined-member-list",
             "--log-level",
             "4",
