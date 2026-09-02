@@ -68,7 +68,11 @@ jobs:
           mkdir -p ~/.reticulum
           cat > ~/.reticulum/config <<'CONFIG'
           [reticulum]
-            enable_transport = No
+            # Transport must be on: it is what makes this node pass announces
+            # and serve path requests. With it off, only a client that happens
+            # to attach before the hub announces can ever find it, and the
+            # other waits out a full discovery timeout.
+            enable_transport = Yes
             share_instance = Yes
             shared_instance_type = tcp
             shared_instance_port = 37500
