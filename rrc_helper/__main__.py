@@ -36,7 +36,7 @@ from typing import Any, BinaryIO, Callable
 from . import identity as identity_store
 from . import ipc
 from . import link as link_mod
-from .session import RRCSession
+from .session import RRCSession, normalise_room
 
 #: Queue entries are ``(kind, payload)``; these are the kinds.
 _CMD, _EOF, _UP, _FRAME, _DOWN, _RETRY, _HELLO = (
@@ -101,7 +101,7 @@ class Helper:
         self.hub: link_mod.HubLink | None = None
         self.identity = None
         self.backoff = link_mod.Backoff()
-        self.autojoin: list[str] = []
+        self.wanted: list[str] = []
         self.dest_hash: bytes | None = None
         self.reconnect = True
         self.hello_attempts = 0
@@ -154,14 +154,16 @@ class Helper:
         self.identity = identity_store.load_or_create(
             path if path else identity_store.default_path()
         )
-        self.autojoin = [r for r in cmd.get("autojoin") or [] if isinstance(r, str)]
+        self.wanted = []
+        for room in cmd.get("autojoin") or []:
+            self._want(room)
         self.reconnect = bool(cmd.get("reconnect", True))
         self.session = RRCSession(
             self.identity.hash,
             send=self._send,
             emit=self.emit,
             nick=cmd.get("nick"),
-            on_ready=self._join_autojoin,
+            on_ready=self._rejoin,
         )
         self.emit({"op": "identity", "hash": self.identity.hash.hex()})
         self._open_link()
@@ -175,12 +177,38 @@ class Helper:
         self.emit({"op": "state", "state": "down", "reason": "disconnected"})
 
     def _cmd_join(self, cmd: dict[str, Any]) -> None:
-        """Join the room named in *cmd*."""
-        self._require_session().join(cmd.get("room") or "")
+        """Join the room named in *cmd*, and stay in it across reconnects."""
+        room = cmd.get("room") or ""
+        self._require_session().join(room)
+        self._want(room)
 
     def _cmd_part(self, cmd: dict[str, Any]) -> None:
-        """Leave the room named in *cmd*."""
-        self._require_session().part(cmd.get("room") or "")
+        """Leave the room named in *cmd* and stop rejoining it.
+
+        ``rrc.py`` sends this both for ``/part`` and for a closed room buffer,
+        so either gesture ends the membership for good.
+        """
+        room = cmd.get("room") or ""
+        self._require_session().part(room)
+        self._unwant(room)
+
+    def _want(self, room: object) -> None:
+        """Add *room* to the set re-``JOIN``ed after every ``WELCOME``.
+
+        Non-string entries are dropped rather than raising: the list arrives
+        from a config option over IPC and is not trusted to be well typed.
+        """
+        if not isinstance(room, str):
+            return
+        name = normalise_room(room)
+        if name and name not in self.wanted:
+            self.wanted.append(name)
+
+    def _unwant(self, room: str) -> None:
+        """Drop *room* from the set, so a reconnect does not undo leaving it."""
+        name = normalise_room(room)
+        if name in self.wanted:
+            self.wanted.remove(name)
 
     def _cmd_say(self, cmd: dict[str, Any]) -> None:
         """Send room content as a message, notice, or action."""
@@ -251,9 +279,9 @@ class Helper:
     def _on_up(self) -> None:
         """Announce ourselves once the Link is up.
 
-        Only ``HELLO`` is sent here. Rooms are joined from
-        :meth:`_join_autojoin`, which runs when ``WELCOME`` arrives, because a
-        hub may reject anything sent before it has accepted the session.
+        Only ``HELLO`` is sent here. Rooms are joined from :meth:`_rejoin`,
+        which runs when ``WELCOME`` arrives, because a hub may reject anything
+        sent before it has accepted the session.
         """
         self.backoff.reset()
         self.emit({"op": "state", "state": "up"})
@@ -284,12 +312,19 @@ class Helper:
         session.start()
         self._schedule(HELLO_RETRY_SECONDS, lambda: self.events.put((_HELLO, None)))
 
-    def _join_autojoin(self) -> None:
-        """Join the configured rooms, once the hub has sent ``WELCOME``."""
+    def _rejoin(self) -> None:
+        """Join every room the user is in, once the hub has sent ``WELCOME``.
+
+        The set lives on the helper rather than on the session because a
+        session ends with its Link: :meth:`RRCSession.on_link_down` clears its
+        room set, as 1-RRC requires, so there is nothing left there to restore
+        from. Rooms entered with ``/join`` therefore come back after an outage
+        exactly as configured ones do (``SPEC.md`` D5).
+        """
         session = self.session
         if session is None:  # pragma: no cover - disconnect raced the callback
             return
-        for room in self.autojoin:
+        for room in self.wanted:
             session.join(room)
 
     def _on_down(self, reason: str) -> None:

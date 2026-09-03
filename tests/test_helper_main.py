@@ -225,7 +225,118 @@ def test_autojoin_after_welcome_without_a_session_is_safe(helper):
     """A disconnect racing the WELCOME callback must not raise."""
     helper.handle({"op": "connect", "hub": HUB, "autojoin": ["#general"]})
     helper.session = None
-    helper._join_autojoin()
+    helper._rejoin()
+
+
+# -- rejoin after an outage (ACCEPTANCE C5 regression) ---------------------
+
+
+def _welcome(helper_obj):
+    """Deliver a WELCOME, opening the session for room joins."""
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+
+    helper_obj.session.on_frame(E.encode(C.T_WELCOME, src=bytes.fromhex(PEER), body={}))
+
+
+def _joined(helper_obj, room):
+    """Deliver the hub's JOINED confirmation for our own join of *room*."""
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+
+    helper_obj.session.on_frame(
+        E.encode(
+            C.T_JOINED,
+            src=bytes.fromhex(PEER),
+            room=room,
+            body=[FakeIdentity.hash],
+        )
+    )
+
+
+def _rejoins(link):
+    """Return the rooms this Link was asked to JOIN, in order."""
+    from rrc_helper import constants as C
+    from rrc_helper import envelope as E
+
+    return [
+        E.decode(frame).room for frame in link.sent if E.decode(frame).type == C.T_JOIN
+    ]
+
+
+def _outage(helper_obj):
+    """Drop the Link, run the backoff, and complete a fresh handshake.
+
+    Returns the new Link, so a test can assert on what the reconnected
+    session sent rather than on the previous one.
+    """
+    helper_obj._on_down("link timed out")
+    helper_obj._open_link()
+    helper_obj._on_up()
+    _welcome(helper_obj)
+    return FakeHubLink.created[-1]
+
+
+def test_a_room_joined_by_hand_is_rejoined_after_an_outage(helper):
+    """A room the user typed ``/join`` for comes back after a reconnect.
+
+    The room the user is in is not necessarily a room in ``rrc.autojoin``:
+    ``rrc.autojoin`` is empty by default. Membership evaporates with the Link
+    (1-RRC), but the buffer stays open, so a session that does not re-JOIN
+    leaves the user staring at a buffer that silently receives nothing.
+    """
+    helper.handle({"op": "connect", "hub": HUB, "autojoin": []})
+    helper._on_up()
+    _welcome(helper)
+    helper.handle({"op": "join", "room": "#general"})
+    _joined(helper, "#general")
+
+    assert _rejoins(_outage(helper)) == ["#general"]
+
+
+def test_a_parted_room_is_not_rejoined_after_an_outage(helper):
+    """Leaving a room is remembered; only ``/part`` and buffer close do that.
+
+    ``rrc.py`` sends the same ``part`` command when the user types ``/part``
+    and when they close the room buffer, so this covers both.
+    """
+    helper.handle({"op": "connect", "hub": HUB, "autojoin": []})
+    helper._on_up()
+    _welcome(helper)
+    helper.handle({"op": "join", "room": "#general"})
+    _joined(helper, "#general")
+    helper.handle({"op": "part", "room": "#general"})
+    # Parting a room that was never joined is harmless; rrc.py allows
+    # ``/part #other`` from any of its buffers.
+    helper.handle({"op": "part", "room": "#nowhere"})
+
+    assert _rejoins(_outage(helper)) == []
+
+
+def test_configured_and_hand_joined_rooms_are_both_rejoined_once(helper):
+    """Both sources feed one set, and a room in both is joined only once."""
+    helper.handle({"op": "connect", "hub": HUB, "autojoin": ["#general"]})
+    helper._on_up()
+    _welcome(helper)
+    # #general is already configured; joining it by hand must not duplicate it.
+    helper.handle({"op": "join", "room": "#general"})
+    helper.handle({"op": "join", "room": "#radio"})
+    _joined(helper, "#radio")
+
+    assert helper.wanted == ["#general", "#radio"]
+    assert _rejoins(_outage(helper)) == ["#general", "#radio"]
+
+
+def test_rejoin_matches_rooms_case_insensitively(helper):
+    """``/part #general`` cancels ``/join #General`` (3-RRC normalisation)."""
+    helper.handle({"op": "connect", "hub": HUB, "autojoin": []})
+    helper._on_up()
+    _welcome(helper)
+    helper.handle({"op": "join", "room": "#General"})
+    _joined(helper, "#general")
+    helper.handle({"op": "part", "room": "#GENERAL"})
+
+    assert _rejoins(_outage(helper)) == []
 
 
 def test_say_join_part_reach_the_link(connected):
