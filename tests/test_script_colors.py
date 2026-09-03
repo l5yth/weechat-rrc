@@ -49,7 +49,10 @@ def test_the_fake_is_realistic_enough_to_test_against(wee):
     assert second.startswith(COLOUR)
     assert first != second, "distinct identities must get distinct colours"
     assert weechat.info_get("nick_color", ALICE) == first, "colour must be stable"
-    assert weechat.info_get("nick_color_name", ALICE) == first[1:]
+    # Deliberately NOT asserted: that the code equals 0x19 + the colour name.
+    # Real WeeChat 4.10 answers "lightblue" and "\x19F10" for one key, so
+    # pinning that relationship would make this guard itself unrealistic.
+    assert weechat.info_get("nick_color_name", ALICE), "a colour name is needed"
 
 
 def deliver(rrc, connection, process, *events):
@@ -198,8 +201,15 @@ def test_a_late_nickname_leaves_the_identity_colour_untouched(connected):
     assert after == before
 
 
-def test_two_members_sharing_an_identity_nickname_differ_in_colour(connected):
-    """An impostor taking a nickname does not take the colour with it."""
+def test_two_members_sharing_an_identity_nickname_are_keyed_separately(connected):
+    """An impostor taking a nickname is still looked up as themselves.
+
+    What is asserted is that each line carries **that sender's own** colour,
+    looked up per identity. Deliberately not asserted: that the two colours
+    differ. WeeChat's palette is finite and collisions are certain, so two
+    identities may legitimately share a colour (SPEC.md D21) — that would be a
+    property of the stand-in fake, not of the behaviour under test.
+    """
     weechat, rrc, connection, process = connected
     deliver(
         rrc, connection, process, {"op": "joined", "room": "#general", "members": []}
@@ -209,7 +219,6 @@ def test_two_members_sharing_an_identity_nickname_differ_in_colour(connected):
     first, second = room_lines(weechat, connection)[-2:]
     assert first.startswith(weechat.info_get("nick_color", ALICE))
     assert second.startswith(weechat.info_get("nick_color", BOB))
-    assert first.split(RESET)[0] != second.split(RESET)[0]
 
 
 def test_one_identity_keeps_one_colour_across_every_surface(connected):
@@ -330,3 +339,19 @@ def test_an_unknown_or_absent_identity_raises_nothing(connected):
     )
     assert len(room_lines(weechat, connection)) == 2
     assert room_lines(weechat, connection)[-1].endswith("\thi")
+
+
+def test_the_own_echo_surface_colours_your_own_name(connected):
+    """Your own outgoing direct message names you in your own colour.
+
+    A fifth place a person is named, and the one where getting it wrong is
+    least visible: the hub does not echo direct messages, so this line is
+    written locally, and an uncoloured one would show you in a different colour
+    from the one everybody else sees you in.
+    """
+    weechat, rrc, connection, process = connected
+    deliver(rrc, connection, process, {"op": "identity", "hash": ALICE})
+    dm = connection.dm_buffer(BOB)
+    rrc.rrc_input_cb(f"{connection.name}/@{BOB}", dm, "psst")
+    line = weechat.state.buffers[dm].lines[-1]
+    assert line == weechat.info_get("nick_color", ALICE) + "afri" + RESET + "\tpsst"

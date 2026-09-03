@@ -639,7 +639,10 @@ class Connection:
 
     def _ev_identity(self, event: dict) -> None:
         """Record and show the identity this session presents to the hub."""
-        self.identity = event.get("hash", "")
+        # Helper-sourced, so not hostile — but it is now a colour key as well
+        # as display text, and every other displayed value is cleaned. Being
+        # the one exception is not worth the reader's second look.
+        self.identity = clean(event.get("hash"))
         self.display(f"your identity is {self.identity}", "--")
 
     def _ev_state(self, event: dict) -> None:
@@ -876,9 +879,12 @@ def rrc_input_cb(data: str, buffer: str, text: str) -> int:
         return weechat.WEECHAT_RC_OK
     if target.startswith(DM_PREFIX):
         connection.direct(target[len(DM_PREFIX) :], text)
+        # Your own echo is a fifth place a person is named, so it is coloured
+        # like the other four (SPEC.md D19) — keyed on your identity, which is
+        # what makes your name look the same here as it does to everyone else.
         weechat.prnt(
             connection.dms[target[len(DM_PREFIX) :]],
-            f"{connection.nick or 'you'}\t{text}",
+            f"{coloured(connection.identity, connection.nick or 'you')}\t{text}",
         )
         return weechat.WEECHAT_RC_OK
     connection.say(target, text)
