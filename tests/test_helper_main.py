@@ -639,3 +639,36 @@ def test_the_run_loop_dispatches_a_hello_retry(helper):
     helper.events.put(("eof", None))
     helper.run(io.BytesIO())
     assert len(FakeHubLink.created[0].sent) == before + 1
+
+
+def test_ipc_ops_are_exactly_the_documented_set():
+    """The helper's command surface is closed (ACCEPTANCE W5, SPEC D18).
+
+    The automatic ``/who`` is a script-side gesture that travels as an ordinary
+    ``say``. Nothing about it belongs in the helper, so this pins the dispatch
+    table: a new op here means protocol-layer knowledge of a hub command leaked
+    across the IPC boundary.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    source = textwrap.dedent(inspect.getsource(Helper.handle))
+    ops = {
+        key.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Dict)
+        for key in node.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    assert ops == {
+        "connect",
+        "disconnect",
+        "join",
+        "part",
+        "say",
+        "direct",
+        "nick",
+        "ping",
+        "quit",
+    }

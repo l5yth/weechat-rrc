@@ -49,6 +49,7 @@ DEFAULTS = {
     "identity.path": "",
     "reconnect": "on",
     "autojoin": "",
+    "who_on_join": "on",
 }
 
 #: Import check a candidate interpreter must pass to run the helper.
@@ -419,6 +420,31 @@ class Connection:
             text = text[1:]
         self.send({"op": "say", "room": room, "text": text})
 
+    def who(self, room: str) -> None:
+        """Ask the hub who is in *room*, unless the user turned that off.
+
+        ``JOINED`` carries identity hashes and nothing else, so anyone already
+        present when this client arrives has no nickname to show and renders as
+        a short hash for as long as they stay quiet. A hub's ``/who`` reply is
+        the only source of those names, and :meth:`learn_members` parses it.
+
+        This is the one hub command the plugin sends on its own, a named
+        exception to the rule that hub commands are the user's to type
+        (``SPEC.md`` D15); ``/set plugins.var.python.rrc.who_on_join off``
+        disables it. Nothing else is assumed about the hub: the request goes
+        out as an ordinary message, and whatever comes back — a listing, an
+        "unknown command" notice, an error, or silence — is rendered exactly as
+        it would be had the user typed ``//who`` (``SPEC.md`` D17).
+
+        The room is named in the text rather than left to the envelope's room
+        field. ``rrcd`` accepts ``/who [room]`` and falls back to the envelope
+        when the argument is absent, but naming it is unambiguous on a hub that
+        does not.
+        """
+        if weechat.config_get_plugin("who_on_join") == "off":
+            return
+        self.say(room, f"/who {room}")
+
     def direct(self, target: str, text: str) -> None:
         """Send a direct message to *target*'s identity hash."""
         self.send({"op": "direct", "target": target, "text": text})
@@ -617,6 +643,10 @@ class Connection:
         for identity in members:
             self.note_member(room, clean(identity))
         weechat.prnt(buffer, f"--\tjoined {room} ({len(members)} present)")
+        # Asked after the join line so the hub's answer reads as a reply to it.
+        # This runs on a re-JOIN after an outage too, which is when the
+        # nicklist has just been rebuilt from hashes and needs it most.
+        self.who(room)
 
     def _ev_parted(self, event: dict) -> None:
         """Report that we left a room."""
@@ -1119,7 +1149,9 @@ def main() -> None:
         "else, so the irc plugin is unaffected.\n\n"
         "To send a hub command such as /who or /topic, double the slash:\n"
         "typing //who sends the literal /who to the hub, which interprets it.\n"
-        "Hub commands differ between hubs, so none are assumed here.\n\n"
+        "Hub commands differ between hubs, so none are assumed here, with\n"
+        "one exception: joining a room sends /who to put names on the members\n"
+        "already there. Set who_on_join to off to stop that.\n\n"
         "A running Reticulum shared instance is assumed; this script never\n"
         "reads or writes your Reticulum configuration.",
         "connect || disconnect || list || status || join || part || nick || ping",

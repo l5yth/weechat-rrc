@@ -71,7 +71,7 @@ Join the general channel of the RNS Community hub:
 ```
 /rrc connect 28c7c1a68c735693aa8e6b8193ed44b2 -nick weechatter
 /join general
-//who
+//list
 ```
 
 ## Commands
@@ -118,6 +118,7 @@ Hub commands vary per hub. `rrcd` accepts `//who`, `//names`, `//list`, `//topic
 | `identity.path` | *(auto)* | Identity file to use |
 | `autojoin` | *(empty)* | Comma-separated rooms to rejoin |
 | `reconnect` | `on` | Reconnect with backoff on link loss |
+| `who_on_join` | `on` | Ask the hub who is present after joining a room |
 
 Interpreter resolution: `helper.python` → `$RRC_PYTHON` → `python3` →
 `~/.local/share/weechat/rrc-venv/bin/python` → `~/.venv/bin/python`.
