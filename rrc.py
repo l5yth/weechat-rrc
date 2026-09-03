@@ -337,12 +337,7 @@ class Connection:
         return True
 
     def autojoin(self) -> list[str]:
-        """Return the configured rooms to join on connect.
-
-        These seed the helper's rejoin set; rooms entered later with ``/join``
-        are added to it there, so both come back after an outage (``SPEC.md``
-        D5). Nothing here is consulted again after the ``connect`` command.
-        """
+        """Return the configured rooms that seed the helper's rejoin set."""
         raw = weechat.config_get_plugin("autojoin")
         return [room.strip() for room in raw.split(",") if room.strip()]
 
