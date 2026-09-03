@@ -40,7 +40,7 @@ from .limits import Limits
 
 #: Client name and version advertised in the ``HELLO`` body.
 CLIENT_NAME = "weechat-rrc"
-CLIENT_VERSION = "0.1.0"
+CLIENT_VERSION = "0.1.1"
 
 #: Capabilities this client advertises. Resource transfer is deliberately
 #: absent: ``EX1`` says a client that does not want resources should simply not

@@ -39,7 +39,7 @@ import weechat
 
 SCRIPT_NAME = "rrc"
 SCRIPT_AUTHOR = "Afri Blank (@l5yth)"
-SCRIPT_VERSION = "0.1.0"
+SCRIPT_VERSION = "0.1.1"
 SCRIPT_LICENSE = "Apache-2.0"
 SCRIPT_DESC = "Reticulum Relay Chat (RRC) client"
 
@@ -251,6 +251,31 @@ def speaker(event: dict) -> str:
     whenever no nickname was supplied.
     """
     return clean(event.get("nick")) or short(event.get("src", ""))
+
+
+def coloured(identity: str, name: str) -> str:
+    """Return *name* wrapped in the colour WeeChat assigns to *identity*.
+
+    The colour is keyed on the identity hash, never on the displayed name, so
+    it follows the person through a rename and an impostor who takes somebody's
+    nickname does not take their colour with it (``SPEC.md`` D21). WeeChat
+    computes it: the user's own ``weechat.color.chat_nick_colors`` palette and
+    ``weechat.look.nick_color_hash`` algorithm apply here exactly as they do in
+    the irc plugin, and nothing in this repository selects or hashes a colour
+    (``SPEC.md`` D20).
+
+    The trailing reset is load-bearing. Without it the speaker's colour runs on
+    past the name into the message body, which is hub-supplied text that must
+    never carry formatting the plugin did not choose (``SPEC.md`` D22).
+
+    Args:
+        identity: The sender's full identity hash, as hex.
+        name: The already-sanitised display name to wrap.
+
+    Returns:
+        The name with a leading colour code and a trailing reset.
+    """
+    return weechat.info_get("nick_color", identity) + name + weechat.color("reset")
 
 
 class Connection:
@@ -548,7 +573,13 @@ class Connection:
             self.members.get(room, {}).items(), key=lambda item: item[1] or item[0]
         ):
             weechat.nicklist_add_nick(
-                pointer, "", nick or short(identity), "bar_fg", "", "bar_fg", 1
+                pointer,
+                "",
+                nick or short(identity),
+                weechat.info_get("nick_color_name", identity),
+                "",
+                "bar_fg",
+                1,
             )
 
     def resolve(self, token: str) -> str | None:
@@ -608,7 +639,10 @@ class Connection:
 
     def _ev_identity(self, event: dict) -> None:
         """Record and show the identity this session presents to the hub."""
-        self.identity = event.get("hash", "")
+        # Helper-sourced, so not hostile — but it is now a colour key as well
+        # as display text, and every other displayed value is cleaned. Being
+        # the one exception is not worth the reader's second look.
+        self.identity = clean(event.get("hash"))
         self.display(f"your identity is {self.identity}", "--")
 
     def _ev_state(self, event: dict) -> None:
@@ -671,7 +705,7 @@ class Connection:
                 continue
             weechat.prnt(
                 self.room_buffer(room),
-                f"-->\t{nick or short(identity)} joined {room}",
+                f"-->\t{coloured(identity, nick or short(identity))} joined {room}",
             )
 
     def _ev_part(self, event: dict) -> None:
@@ -684,7 +718,7 @@ class Connection:
             # Likewise, only announce a departure for somebody we still list.
             if identity not in self.members.get(room, {}):
                 continue
-            name = clean(event.get("nick")) or short(identity)
+            name = coloured(identity, clean(event.get("nick")) or short(identity))
             weechat.prnt(self.rooms[room], f"<--\t{name} left {room}")
             self.drop_member(room, identity)
 
@@ -698,7 +732,7 @@ class Connection:
             )
         target = self.room_buffer(clean(room)) if room else self.buffer
         body = clean(event.get("body"))
-        name = speaker(event)
+        name = coloured(clean(event.get("src")), speaker(event))
         kind = event.get("kind")
         if kind == "notice":
             self.learn_members(body)
@@ -716,7 +750,11 @@ class Connection:
         nick = clean(event.get("nick"))
         if nick:
             weechat.buffer_set(buffer, "short_name", nick)
-        weechat.prnt(buffer, f"{nick or short(identity)}\t{clean(event.get('body'))}")
+        weechat.prnt(
+            buffer,
+            f"{coloured(identity, nick or short(identity))}"
+            f"\t{clean(event.get('body'))}",
+        )
 
     def _ev_pong(self, event: dict) -> None:
         """Record the measured round-trip time."""
@@ -841,9 +879,12 @@ def rrc_input_cb(data: str, buffer: str, text: str) -> int:
         return weechat.WEECHAT_RC_OK
     if target.startswith(DM_PREFIX):
         connection.direct(target[len(DM_PREFIX) :], text)
+        # Your own echo is a fifth place a person is named, so it is coloured
+        # like the other four (SPEC.md D19) — keyed on your identity, which is
+        # what makes your name look the same here as it does to everyone else.
         weechat.prnt(
             connection.dms[target[len(DM_PREFIX) :]],
-            f"{connection.nick or 'you'}\t{text}",
+            f"{coloured(connection.identity, connection.nick or 'you')}\t{text}",
         )
         return weechat.WEECHAT_RC_OK
     connection.say(target, text)

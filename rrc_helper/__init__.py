@@ -26,4 +26,4 @@ The WeeChat-facing half of the plugin lives in ``rrc.py`` and imports nothing
 outside the standard library.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
