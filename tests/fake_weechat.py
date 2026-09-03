@@ -70,6 +70,7 @@ class State:
         self.config = {}
         self.unhooked = []
         self.counter = 0
+        self.nick_colors = {}
 
     def reset(self):
         """Forget everything, as if WeeChat had just started."""
@@ -235,13 +236,68 @@ def config_get_plugin(option):
     return state.config.get(option, "")
 
 
+#: Colour names handed out by :func:`info_get`, in assignment order. Real
+#: WeeChat picks from ``weechat.color.chat_nick_colors``; the exact names do not
+#: matter here, only that they are distinct and stable.
+NICK_COLORS = (
+    "cyan",
+    "magenta",
+    "green",
+    "brown",
+    "lightblue",
+    "lightcyan",
+    "lightmagenta",
+    "lightgreen",
+    "31",
+    "35",
+    "38",
+    "40",
+    "49",
+    "63",
+    "70",
+    "80",
+)
+
+
 def color(name):
-    """Return an empty string; colour codes only add noise in tests."""
-    return ""
+    """Return a colour code shaped like the one real WeeChat returns.
+
+    WeeChat answers ``color("reset")`` with ``0x1C`` and a colour name with a
+    ``0x19``-prefixed code. An earlier version of this stand-in returned ``""``
+    for everything, on the reasoning that colour codes are noise in tests. That
+    was true until the script began emitting colour itself: against an empty
+    fake, no code ever reaches a rendered line, so every colour assertion in the
+    suite passes without testing anything and the C8 injection check passes for
+    the wrong reason.
+    """
+    if name == "reset":
+        return "\x1c"
+    return "\x19" + name
+
+
+def _nick_color_name(key):
+    """Return a stable colour name for *key*, assigned on first sight.
+
+    Deliberately **not** a model of WeeChat's djb2 hashing. It guarantees that
+    distinct keys get distinct colours, which real WeeChat does not — its
+    palette is finite and collisions are certain (``SPEC.md`` D21). Tests may
+    therefore rely on "different identity, different colour" here, and must not
+    assert anything about collisions, which are a property of the real
+    implementation and not of this one.
+    """
+    if not key:
+        return "default"  # what real WeeChat answers for an empty nick
+    if key not in state.nick_colors:
+        state.nick_colors[key] = NICK_COLORS[len(state.nick_colors) % len(NICK_COLORS)]
+    return state.nick_colors[key]
 
 
 def info_get(name, arguments):
     """Return a plausible value for the few info keys the script uses."""
+    if name == "nick_color_name":
+        return _nick_color_name(arguments)
+    if name == "nick_color":
+        return "\x19" + _nick_color_name(arguments)
     return {"weechat_dir": "/home/user/.config/weechat"}.get(name, "")
 
 
@@ -253,8 +309,17 @@ def nicklist_add_group(buffer, parent, name, group_color, visible):
 
 
 def nicklist_add_nick(buffer, group, name, nick_color, prefix, prefix_color, visible):
-    """Add a nick to a buffer's nicklist."""
-    state.buffers[buffer].nicks[name] = {"group": group, "prefix": prefix}
+    """Add a nick to a buffer's nicklist.
+
+    The colour argument is recorded, not discarded: it is the whole of what
+    nickname colouring changes about the nicklist, so a test that cannot see it
+    cannot check it (``SPEC.md`` D19).
+    """
+    state.buffers[buffer].nicks[name] = {
+        "group": group,
+        "prefix": prefix,
+        "color": nick_color,
+    }
     return state.pointer("n")
 
 

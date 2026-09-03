@@ -33,6 +33,19 @@ PEER = "1f5a80f61a6194267cf6b6df6a954adb"
 #: free of them.
 NUL, TAB, ESC = chr(0), chr(9), chr(27)
 
+#: WeeChat's colour and reset markers, which the plugin now emits itself.
+COLOUR, ATTRIBUTE, RESET = chr(25), chr(26), chr(28)
+
+
+def coloured(weechat, identity, name):
+    """Return *name* as the script renders it: colour code, name, reset.
+
+    Built from the fake's own answers rather than written out, so a test says
+    "the colour WeeChat gave this identity" instead of pinning a literal that
+    would have to change with the palette (SPEC D20).
+    """
+    return weechat.info_get("nick_color", identity) + name + weechat.color("reset")
+
 
 def deliver(rrc, connection, process, *events):
     """Push *events* down the helper pipe and let the script read them."""
@@ -226,8 +239,8 @@ def test_others_joining_and_leaving_are_shown(connected):
         {"op": "part", "room": "#general", "members": [PEER], "nick": "bob"},
     )
     text = "\n".join(lines(weechat, connection.rooms["#general"]))
-    assert "bob joined #general" in text
-    assert "bob left #general" in text
+    assert coloured(weechat, PEER, "bob") + " joined #general" in text
+    assert coloured(weechat, PEER, "bob") + " left #general" in text
 
 
 def test_a_member_without_a_nickname_shows_a_short_hash(connected):
@@ -268,16 +281,17 @@ def test_own_part_is_reported(connected):
 
 
 @pytest.mark.parametrize(
-    "kind,body,expected",
+    "kind,body,template",
     [
-        ("msg", "hello", "bob" + TAB + "hello"),
-        ("action", "waves", " *" + TAB + "bob waves"),
-        ("notice", "fyi", "--" + TAB + "bob: fyi"),
+        ("msg", "hello", "{name}" + TAB + "hello"),
+        ("action", "waves", " *" + TAB + "{name} waves"),
+        ("notice", "fyi", "--" + TAB + "{name}: fyi"),
     ],
 )
-def test_each_chat_kind_renders_distinctly(connected, kind, body, expected):
+def test_each_chat_kind_renders_distinctly(connected, kind, body, template):
     """A message, an emote and a notice are visually distinguishable."""
     weechat, rrc, connection, process = connected
+    expected = template.format(name=coloured(weechat, PEER, "bob"))
     deliver(
         rrc,
         connection,
@@ -315,7 +329,7 @@ def test_a_speaker_without_a_nickname_shows_a_short_hash(connected):
         process,
         {"op": "chat", "kind": "msg", "room": "#general", "src": PEER, "body": "hi"},
     )
-    expected = PEER[:8] + TAB + "hi"
+    expected = coloured(weechat, PEER, PEER[:8]) + TAB + "hi"
     assert expected in raw_lines(weechat, connection.rooms["#general"])
 
 
@@ -359,7 +373,7 @@ def test_a_direct_message_opens_a_private_buffer(connected):
     assert buffer is not None
     assert buffer.properties["localvar_set_type"] == "private"
     assert buffer.properties["short_name"] == "alice"
-    assert "alice" + TAB + "psst" in buffer.lines
+    assert coloured(weechat, PEER, "alice") + TAB + "psst" in buffer.lines
 
 
 def test_direct_messages_reuse_one_buffer_per_peer(connected):
@@ -383,7 +397,7 @@ def test_a_direct_message_without_a_nickname_uses_the_hash(connected):
     weechat, rrc, connection, process = connected
     deliver(rrc, connection, process, {"op": "direct", "src": PEER, "body": "hi"})
     buffer = weechat.state.buffers[connection.dms[PEER]]
-    assert PEER[:8] + TAB + "hi" in buffer.lines
+    assert coloured(weechat, PEER, PEER[:8]) + TAB + "hi" in buffer.lines
 
 
 # -- buffer input and closing ----------------------------------------------
@@ -489,6 +503,12 @@ def test_newlines_and_weechat_colour_codes_are_stripped(connected, hostile):
 
     WeeChat reads 0x19, 0x1A, 0x1B and 0x1C as colour and attribute markers, so
     a hub could otherwise recolour or restyle a line it did not own.
+
+    Since nickname colours landed the plugin emits 0x19 and 0x1C itself, so
+    absence is no longer the right test. This asserts **provenance**: every
+    formatting byte in the line is one the plugin chose, derived from the
+    Link-authenticated identity hash, and the hub-supplied span carries none
+    (SPEC D22, ACCEPTANCE C8 as amended).
     """
     weechat, rrc, connection, process = connected
     deliver(
@@ -506,5 +526,16 @@ def test_newlines_and_weechat_colour_codes_are_stripped(connected, hostile):
     )
     rendered = raw_lines(weechat, connection.rooms["#general"])
     assert len(rendered) == 1, "a newline forged an extra buffer line"
-    for code in (10, 25, 26, 27, 28):
-        assert chr(code) not in rendered[0]
+    line = rendered[0]
+
+    # Exactly the plugin's own formatting, and no more of it.
+    assert line.startswith(coloured(weechat, PEER, "bob") + TAB)
+    assert line.count(COLOUR) == 1, "a second colour code reached the line"
+    assert line.count(RESET) == 1, "a second reset reached the line"
+    assert ATTRIBUTE not in line, "the plugin never emits an attribute marker"
+    assert ESC not in line, "the plugin never emits an escape"
+
+    # The hub-supplied span carries none of it.
+    body = line.split(TAB, 1)[1]
+    for byte in (chr(10), COLOUR, ATTRIBUTE, ESC, RESET):
+        assert byte not in body, "hub text kept a formatting byte"

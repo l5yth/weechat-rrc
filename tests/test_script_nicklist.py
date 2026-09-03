@@ -29,6 +29,11 @@ ALICE = "1f5a80f61a6194267cf6b6df6a954adb"
 BOB = "aabbccddeeff00112233445566778899"
 
 
+def coloured(weechat, identity, name):
+    """Return *name* as the script renders it: colour code, name, reset."""
+    return weechat.info_get("nick_color", identity) + name + weechat.color("reset")
+
+
 def nicks(weechat, connection, room):
     """Return the nicknames currently shown in *room*'s nicklist."""
     return set(weechat.state.buffers[connection.rooms[room]].nicks)
@@ -274,7 +279,7 @@ def test_a_repeated_join_is_announced_once(connected):
         {"op": "join", "room": "#general", "members": [BOB], "nick": "bob"},
     )
     text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
-    assert text.count("bob joined") == 1
+    assert text.count(coloured(weechat, BOB, "bob") + " joined") == 1
     assert nicks(weechat, connection, "#general") == {"bob"}
 
 
@@ -305,7 +310,7 @@ def test_a_rejoin_after_a_part_is_announced(connected):
         {"op": "join", "room": "#general", "members": [BOB], "nick": "bob"},
     )
     text = "\n".join(weechat.state.buffers[connection.rooms["#general"]].text)
-    assert text.count("bob joined") == 1
+    assert text.count(coloured(weechat, BOB, "bob") + " joined") == 1
     assert text.count("left") == 1
 
 
