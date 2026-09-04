@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import pytest
 
-from rrc_helper import constants as C
-from rrc_helper.link import Backoff, DEFAULT_BACKOFF_CAP
+from rrc.helper import constants as C
+from rrc.helper.link import Backoff, DEFAULT_BACKOFF_CAP
 
 
 def test_backoff_doubles_from_the_base():

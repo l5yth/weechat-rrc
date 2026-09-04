@@ -102,8 +102,8 @@ def test_connect_passes_configured_autojoin_rooms(wee, monkeypatch):
 
     weechat.config_set_plugin("autojoin", "#general, ,#radio")
     process = FakeProcess()
-    monkeypatch.setattr(rrc, "find_python", lambda: "python3")
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: "python3")
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: process)
     try:
         rrc.rrc_command_cb("", "", f"connect {HUB}")
         assert process.written[0]["autojoin"] == ["#general", "#radio"]
@@ -128,12 +128,12 @@ def test_connecting_twice_to_one_hub_is_refused(connected):
 def test_connect_reports_a_helper_that_will_not_start(wee, monkeypatch):
     """An unlaunchable helper is reported instead of leaving a dead buffer."""
     weechat, rrc = wee
-    monkeypatch.setattr(rrc, "find_python", lambda: "python3")
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: "python3")
 
     def boom(*args, **kwargs):
         raise OSError("permission denied")
 
-    monkeypatch.setattr(rrc.subprocess, "Popen", boom)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", boom)
     assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
     buffer = weechat.state.any_buffer("rrc.28c7c1a6")
     assert any("could not start the helper" in line for line in buffer.text)
@@ -319,8 +319,8 @@ def test_nick_flag_without_a_value_is_ignored(wee, monkeypatch):
     from tests.conftest import FakeProcess
 
     process = FakeProcess()
-    monkeypatch.setattr(rrc, "find_python", lambda: "python3")
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: "python3")
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: process)
     try:
         rrc.rrc_command_cb("", "", f"connect {HUB} -nick")
         assert process.written[0]["nick"] is None
@@ -378,7 +378,7 @@ def test_several_connections_require_naming_one(connected, monkeypatch):
 
     weechat, rrc, connection, process = connected
     second = FakeProcess()
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: second)
     try:
         rrc.rrc_command_cb("", "", "connect " + "a" * 32)
         other = weechat.buffer_new("core.weechat", "", "", "", "")
@@ -393,7 +393,7 @@ def two_connections(weechat, rrc, monkeypatch):
     from tests.conftest import FakeProcess
 
     second = FakeProcess()
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: second)
     rrc.rrc_command_cb("", "", "connect " + "a" * 32)
     return second
 
@@ -449,7 +449,7 @@ def test_a_failed_connect_closes_its_buffer(wee, monkeypatch):
     and that unrelated error buried the real one.
     """
     weechat, rrc = wee
-    monkeypatch.setattr(rrc, "find_python", lambda: None)
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: None)
     assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
     assert rrc.connections == {}
     # Retrying must reach the same failure, not a buffer-name collision.
@@ -460,24 +460,24 @@ def test_a_failed_connect_closes_its_buffer(wee, monkeypatch):
 
 
 def test_a_missing_helper_package_is_diagnosed(wee, monkeypatch, tmp_path):
-    """A script installed without rrc_helper says so, and where it looked.
+    """A script installed without rrc.helper says so, and where it looked.
 
     Otherwise the only symptom is the helper exiting with
-    "No module named rrc_helper", which names neither the search path nor the
+    "No module named rrc.helper", which names neither the search path nor the
     fix.
     """
     weechat, rrc = wee
-    monkeypatch.setattr(rrc, "find_python", lambda: "python3")
-    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(tmp_path))
-    monkeypatch.setattr(rrc, "helper_directory", lambda: str(tmp_path))
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: "python3")
+    monkeypatch.setattr(rrc.interpreter, "SCRIPT_DIR", str(tmp_path))
+    monkeypatch.setattr(rrc.interpreter, "helper_directory", lambda: str(tmp_path))
 
     def must_not_spawn(*args, **kwargs):
         raise AssertionError("the helper must not be spawned without its package")
 
-    monkeypatch.setattr(rrc.subprocess, "Popen", must_not_spawn)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", must_not_spawn)
     assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_ERROR
     text = weechat.state.all_text
-    assert "rrc_helper package was not found" in text
+    assert "rrc.helper package was not found" in text
     assert str(tmp_path) in text
     assert "/python reload rrc" in text
 
@@ -499,7 +499,7 @@ def test_reconnecting_after_a_disconnect_reuses_the_buffer(connected, monkeypatc
     assert rrc.connections == {}
 
     second = FakeProcess()
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: second)
     try:
         assert rrc.rrc_command_cb("", "", f"connect {HUB}") == weechat.WEECHAT_RC_OK
         reconnected = rrc.connections["28c7c1a6"]
@@ -523,7 +523,7 @@ def test_a_room_buffer_is_reused_after_reconnecting(connected, monkeypatch):
     room_buffer = connection.room_buffer("#general")
     rrc.rrc_command_cb("", connection.buffer, "disconnect")
     second = FakeProcess()
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: second)
     try:
         rrc.rrc_command_cb("", "", f"connect {HUB}")
         assert rrc.connections["28c7c1a6"].room_buffer("#general") == room_buffer
@@ -540,7 +540,7 @@ def test_a_private_buffer_is_reused_after_reconnecting(connected, monkeypatch):
     dm = connection.dm_buffer(peer)
     rrc.rrc_command_cb("", connection.buffer, "disconnect")
     second = FakeProcess()
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: second)
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: second)
     try:
         rrc.rrc_command_cb("", "", f"connect {HUB}")
         assert rrc.connections["28c7c1a6"].dm_buffer(peer) == dm

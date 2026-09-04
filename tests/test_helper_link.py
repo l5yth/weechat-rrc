@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import pytest
 
-from rrc_helper import link as link_mod
-from rrc_helper.link import LinkError
+from rrc.helper import link as link_mod
+from rrc.helper.link import LinkError
 
 HUB = bytes.fromhex("28c7c1a68c735693aa8e6b8193ed44b2")
 

@@ -16,8 +16,8 @@
 # limitations under the License.
 """Assert 100% API-documentation coverage in the pdoc standard.
 
-Every module, public class, and public function under ``rrc.py`` and
-``rrc_helper/`` must carry a docstring, per ``CLAUDE.md``. Implements the
+Every module, public class, and public function under ``rrc/`` must carry a
+docstring, per ``CLAUDE.md``. Implements the
 ``ACCEPTANCE.md`` B3 check so CI and a local reviewer run identical logic.
 """
 
@@ -43,9 +43,7 @@ def undocumented(path):
 
 def main():
     """Exit non-zero if any public definition lacks a docstring."""
-    targets = [pathlib.Path("rrc.py")] + sorted(
-        pathlib.Path("rrc_helper").rglob("*.py")
-    )
+    targets = sorted(pathlib.Path("rrc").rglob("*.py"))
     findings = [f for p in targets if p.exists() for f in undocumented(p)]
     print("\n".join(findings) or "all documented")
     return 1 if findings else 0

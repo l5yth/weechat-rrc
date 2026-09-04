@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import pytest
 
-from rrc_helper import constants as C
-from rrc_helper.limits import Limits
+from rrc.helper import constants as C
+from rrc.helper.limits import Limits
 
 FULL = {
     C.B_LIMIT_MAX_NICK_BYTES: 32,

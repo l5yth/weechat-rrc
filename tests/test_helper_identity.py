@@ -28,7 +28,7 @@ import stat
 
 import pytest
 
-from rrc_helper import identity as I
+from rrc.helper import identity as I
 
 
 def test_create_writes_a_private_key_file(tmp_path):
@@ -130,6 +130,6 @@ def test_per_hub_path_rejects_a_non_hash(bad):
 
 def test_identity_hash_is_the_wire_width(tmp_path):
     """``identity.hash`` is the 16 bytes the envelope's K_SRC field needs."""
-    from rrc_helper import constants as C
+    from rrc.helper import constants as C
 
     assert len(I.create(tmp_path / "identity").hash) == C.IDENTITY_HASH_BYTES

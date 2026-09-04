@@ -20,7 +20,7 @@ This module holds the protocol logic and nothing else: it never imports RNS and
 never touches a socket. It is handed a ``send`` callable for outbound frames and
 an ``emit`` callable for events destined for WeeChat, which makes the whole
 state machine testable without a network. The Reticulum transport that supplies
-those callables lives in :mod:`rrc_helper.link`.
+those callables lives in :mod:`rrc.helper.link`.
 
 Session shape follows 2-RRC §Sessions and First Contact: a Link is the session,
 ``HELLO`` is the first thing the client says, and the hub answers ``WELCOME``.

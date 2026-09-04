@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import pytest
 
-from rrc_helper import constants as C
-from rrc_helper import envelope as E
-from rrc_helper import session as S
+from rrc.helper import constants as C
+from rrc.helper import envelope as E
+from rrc.helper import session as S
 from tests.conftest import Harness
 
 # -- helpers ---------------------------------------------------------------

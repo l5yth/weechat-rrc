@@ -26,7 +26,7 @@ import json
 
 import pytest
 
-from rrc_helper import ipc
+from rrc.helper import ipc
 
 # --------------------------------------------------------------------------
 # Hex conversion at the JSON boundary
@@ -171,10 +171,10 @@ def test_no_key_material_leaves_the_helper(tmp_path):
     A session is driven end to end and every emitted frame is searched for any
     slice of the key material.
     """
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
-    from rrc_helper import identity as identity_store
-    from rrc_helper.session import RRCSession
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
+    from rrc.helper import identity as identity_store
+    from rrc.helper.session import RRCSession
 
     identity = identity_store.create(tmp_path / "identity")
     secret = identity.get_private_key()
