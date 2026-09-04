@@ -133,38 +133,6 @@ Interpreter resolution: `helper.python` → `$RRC_PYTHON` → `python3` →
 
 Closing a room buffer parts the room. Closing the hub buffer disconnects.
 
-## Status bar
-
-The hotlist tells you which buffer wants attention and why. Three states, in
-WeeChat's own colours:
-
-| State | What produced it |
-| --- | --- |
-| activity | Someone joined or left, hub chatter, plugin status |
-| message | Someone spoke: a message, an action, or a notice in a room |
-| highlight | Someone named you, or sent you a direct message |
-
-You are named by your nickname, your identity hash, or its short 8-character
-form. Your own messages never light your own buffer, even when you type your
-own name.
-
-WeeChat owns every knob here, so these are its commands, not ours:
-
-| To | Do |
-| --- | --- |
-| Stop being mentioned in one buffer | `/buffer setauto highlight_words -` |
-| Add words that mention you | `/set weechat.look.highlight "word1,word2"` |
-| Change a buffer's level | `/buffer notify highlight` |
-| Change a whole hub's level | `/set weechat.notify.python.rrc.<hub> message` |
-| Hide join and part lines | `/filter add rrcjoins * rrc_join,rrc_part *` |
-| Never be highlighted by one person | `/buffer setauto hotlist_max_level_nicks_add <nick>:2` |
-| Recolour the states | `/set weechat.color.status_data_msg <colour>` |
-
-Every line also carries a tag naming its kind — `rrc_msg`, `rrc_action`,
-`rrc_notice`, `rrc_direct`, `rrc_join`, `rrc_part`, `rrc_status` — plus
-`nick_<name>` and `rrc_id_<hash>` for who sent it. Filter and trigger on those.
-Mute by `rrc_id_` rather than `nick_` if you want it to survive a rename.
-
 ## Identity
 
 Default: `~/.config/weechat/rrc/identity`, mode `0600`, created on first connect.
