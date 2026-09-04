@@ -46,6 +46,28 @@ def test_registration_seeds_configuration_defaults(wee):
         assert weechat.config_is_set_plugin(option)
 
 
+def test_configuration_options_are_exactly_the_documented_set(wee):
+    """No feature may add an option without this failing (``SPEC.md`` D27).
+
+    The check beside this one iterates ``DEFAULTS`` and asserts each member was
+    seeded, which is a tautology with respect to that dict's membership: it
+    passes just as happily with a sixth option in it. Pinning the set with
+    ``==`` is what actually holds the line, so a decision to ship no option of
+    our own cannot be quietly reversed.
+    """
+    weechat, rrc = wee
+    rrc.main()
+    documented = {
+        "helper.python",
+        "identity.path",
+        "reconnect",
+        "autojoin",
+        "who_on_join",
+    }
+    assert set(rrc.DEFAULTS) == documented
+    assert set(weechat.state.config) == documented, "main() seeded something else"
+
+
 def test_registration_does_nothing_if_weechat_refuses(wee, monkeypatch):
     """A refused registration installs no hooks."""
     weechat, rrc = wee

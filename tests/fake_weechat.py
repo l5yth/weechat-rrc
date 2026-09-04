@@ -46,7 +46,10 @@ class Buffer:
         self.close_cb = close_cb
         self.close_data = close_data
         self.properties = {}
+        self.sets = []
+        self.highlight_words = []
         self.lines = []
+        self.tags = []
         self.nicks = {}
         self.groups = {}
         self.closed = False
@@ -55,6 +58,19 @@ class Buffer:
     def text(self):
         """Return every line printed to this buffer, prefixes stripped."""
         return [line.split("\t", 1)[-1] for line in self.lines]
+
+    def tags_for(self, needle):
+        """Return the tags of the last printed line containing *needle*.
+
+        Tags are what WeeChat scores a line by, so a test that cannot see them
+        cannot check the hotlist level at all (``SPEC.md`` D23). Returned split
+        on commas, which is how WeeChat itself parses the string, so that a
+        forged separator shows up as two tags rather than hiding inside one.
+        """
+        for line, tags in reversed(list(zip(self.lines, self.tags))):
+            if needle in line:
+                return tags.split(",") if tags else []
+        raise LookupError(f"no line containing {needle!r}")
 
 
 class State:
@@ -71,6 +87,7 @@ class State:
         self.unhooked = []
         self.counter = 0
         self.nick_colors = {}
+        self.core_tags = []
 
     def reset(self):
         """Forget everything, as if WeeChat had just started."""
@@ -127,10 +144,23 @@ def register(name, author, version, license_, description, shutdown, charset):
 
 def prnt(buffer, message):
     """Append *message* to *buffer*, or to the core buffer when empty."""
+    prnt_date_tags(buffer, 0, "", message)
+
+
+def prnt_date_tags(buffer, date, tags, message):
+    """Append *message* to *buffer* along with the tags WeeChat would score it by.
+
+    The tag string is recorded rather than discarded. Real WeeChat decides from
+    these whether the buffer enters the hotlist and at which level, so a fake
+    that dropped them would let every check in the hotlist suite pass while
+    proving nothing — the same trap the colour fake fell into by returning "".
+    """
     if not buffer:
         state.core.append(message)
+        state.core_tags.append(tags)
         return
     state.buffers[buffer].lines.append(message)
+    state.buffers[buffer].tags.append(tags)
 
 
 def buffer_new(name, input_cb, input_data, close_cb, close_data):
@@ -149,8 +179,30 @@ def buffer_new(name, input_cb, input_data, close_cb, close_data):
 
 
 def buffer_set(buffer, prop, value):
-    """Record a buffer property."""
-    state.buffers[buffer].properties[prop] = value
+    """Record a buffer property, modelling the highlight-word list properly.
+
+    ``highlight_words_add`` and ``highlight_words_del`` are not properties, they
+    are operations on one: a fake that stored them as if they were would let a
+    wholesale assignment of ``highlight_words`` pass for an add, which is the
+    distinction ``SPEC.md`` D24 turns on. Behaviour matched to WeeChat 4.10,
+    probed directly: adding dedupes, deleting an absent word is a no-op, and
+    adding an empty string does nothing.
+    """
+    buf = state.buffers[buffer]
+    buf.sets.append((prop, value))
+    if prop in ("highlight_words_add", "highlight_words_del"):
+        for word in value.split(","):
+            if not word:
+                continue
+            if prop.endswith("_add"):
+                if word not in buf.highlight_words:
+                    buf.highlight_words.append(word)
+            elif word in buf.highlight_words:
+                buf.highlight_words.remove(word)
+        return
+    if prop == "highlight_words":
+        buf.highlight_words = [word for word in value.split(",") if word]
+    buf.properties[prop] = value
 
 
 def buffer_get_string(buffer, prop):
@@ -160,6 +212,8 @@ def buffer_get_string(buffer, prop):
         return ""
     if prop in ("name", "short_name"):
         return buf.properties.get(prop, buf.name)
+    if prop == "highlight_words":
+        return ",".join(buf.highlight_words)
     return buf.properties.get(prop, "")
 
 
