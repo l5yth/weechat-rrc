@@ -25,7 +25,7 @@ import sys
 
 import pytest
 
-# The repository root, so both ``rrc_helper`` and the top-level ``rrc.py``
+# The repository root, so both ``rrc.helper`` and the top-level ``rrc.py``
 # WeeChat script are importable without installing the package.
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -67,7 +67,7 @@ class Harness:
 
     def __init__(self, nick=None):
         """Create a session that records everything it sends and emits."""
-        from rrc_helper.session import RRCSession
+        from rrc.helper.session import RRCSession
 
         self.raw = []
         self.events = []
@@ -82,14 +82,14 @@ class Harness:
 
     def feed(self, msg_type, **kwargs):
         """Encode an envelope as if from the hub and hand it to the session."""
-        from rrc_helper import envelope as E
+        from rrc.helper import envelope as E
 
         kwargs.setdefault("src", self.HUB)
         self.session.on_frame(E.encode(msg_type, **kwargs))
 
     def welcome(self, caps=(1, 2), limits=None, hub="TestHub"):
         """Deliver a WELCOME, optionally advertising caps and limits."""
-        from rrc_helper import constants as C
+        from rrc.helper import constants as C
 
         body = {C.B_WELCOME_HUB: hub, C.B_WELCOME_VER: "0.1.0"}
         body[C.B_WELCOME_CAPS] = {cap: True for cap in caps}
@@ -100,7 +100,7 @@ class Harness:
     @property
     def sent(self):
         """Return every outbound envelope, decoded."""
-        from rrc_helper import envelope as E
+        from rrc.helper import envelope as E
 
         return [E.decode(raw) for raw in self.raw]
 
@@ -192,6 +192,21 @@ class FakeProcess:
                 pass
 
 
+def purge_script_modules():
+    """Drop the script and its UI modules from ``sys.modules``.
+
+    Importing the script no longer imports one file: ``rrc.rrc`` pulls in
+    ``rrc.ui.*``, and those stay cached under their own names. Dropping only
+    ``rrc`` would leave stale submodules behind, so a test would silently drive
+    the previous test's code -- the same hazard ``/script reload`` faces, and
+    the reason the script purges these itself.
+    """
+    for name in [
+        n for n in sys.modules if n == "rrc" or n.startswith(("rrc.rrc", "rrc.ui"))
+    ]:
+        del sys.modules[name]
+
+
 @pytest.fixture
 def wee(monkeypatch):
     """Import the WeeChat script against the fake API and yield both.
@@ -203,13 +218,13 @@ def wee(monkeypatch):
 
     fake_weechat.state.reset()
     monkeypatch.setitem(sys.modules, "weechat", fake_weechat)
-    sys.modules.pop("rrc", None)
-    import rrc
+    purge_script_modules()
+    from rrc import rrc
 
     rrc.connections.clear()
     yield fake_weechat, rrc
     rrc.connections.clear()
-    sys.modules.pop("rrc", None)
+    purge_script_modules()
 
 
 @pytest.fixture
@@ -217,8 +232,8 @@ def connected(wee, monkeypatch):
     """Return ``(weechat, rrc, connection, process)`` with a started helper."""
     fake_weechat, rrc = wee
     process = FakeProcess()
-    monkeypatch.setattr(rrc, "find_python", lambda: "/usr/bin/python3")
-    monkeypatch.setattr(rrc.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: "/usr/bin/python3")
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "Popen", lambda *a, **k: process)
     rrc.rrc_command_cb("", "", "connect 28c7c1a68c735693aa8e6b8193ed44b2 -nick afri")
     connection = rrc.connections["28c7c1a6"]
     yield fake_weechat, rrc, connection, process

@@ -50,19 +50,22 @@ But any other Python works too:
 ## Install
 
 ```sh
-cp -r rrc.py rrc_helper ~/.local/share/weechat/python/
+cp -r rrc ~/.local/share/weechat/python/
 
 # optional: load at every WeeChat start
 mkdir -p ~/.local/share/weechat/python/autoload
-ln -sf ../rrc.py ~/.local/share/weechat/python/autoload/rrc.py
+ln -sf ../rrc/rrc.py ~/.local/share/weechat/python/autoload/rrc.py
 ```
 
-`rrc_helper` must stay beside `rrc.py` in `python/`, not in `autoload/`.
+The whole `rrc` directory goes in `python/`, not in `autoload/`; only the
+symlink belongs there.
 
 ```
-/script load ~/.local/share/weechat/python/rrc.py
+/script load ~/.local/share/weechat/python/rrc/rrc.py
 /rrc connect <hub-hash>
 ```
+
+Upgrading? Delete the old `python/rrc.py` and `python/rrc_helper/`.
 
 ## Example
 

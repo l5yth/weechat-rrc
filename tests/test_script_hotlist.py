@@ -222,7 +222,7 @@ def test_a_plugin_status_line_stays_at_activity_level(connected):
 def test_a_core_buffer_line_is_scored_at_activity_level(wee):
     """Even the core-buffer diagnostic carries a type tag, so /filter reaches it."""
     weechat, rrc = wee
-    rrc.log("something happened")
+    rrc.render.log("something happened")
     assert weechat.state.core_tags[-1] == "rrc_status"
 
 

@@ -27,8 +27,8 @@ from __future__ import annotations
 import cbor2
 import pytest
 
-from rrc_helper import constants as C
-from rrc_helper import envelope as E
+from rrc.helper import constants as C
+from rrc.helper import envelope as E
 
 # --------------------------------------------------------------------------
 # Encoding conformance (ACCEPTANCE A3b)

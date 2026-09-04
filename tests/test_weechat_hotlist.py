@@ -68,7 +68,7 @@ import weechat
 sys.path.insert(0, {root!r})
 # rrc.py guards main() behind __name__ == "__main__", and WeeChat loads a script
 # under that name, so importing it as a module here registers nothing.
-import rrc
+from rrc import rrc
 
 ME, PEER, LATE, OUT = {me!r}, {peer!r}, {late!r}, {out!r}
 

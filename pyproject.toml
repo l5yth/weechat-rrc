@@ -27,10 +27,10 @@ dependencies = ["rns>=1.5.2", "cbor2>=5.6"]
 test = ["pytest>=8", "coverage>=7", "black>=24"]
 
 [project.scripts]
-rrc-helper = "rrc_helper.__main__:main"
+rrc-helper = "rrc.helper.__main__:main"
 
 [tool.setuptools]
-packages = ["rrc_helper"]
+packages = ["rrc", "rrc.helper"]
 
 [tool.black]
 # Pin to the project's minimum Python so formatting is identical on every
@@ -44,7 +44,7 @@ markers = ["e2e: needs a running rrcd hub and a working Reticulum stack"]
 
 [tool.coverage.run]
 branch = true
-source = ["rrc", "rrc_helper"]
+source = ["rrc"]
 
 [tool.coverage.report]
 fail_under = 100

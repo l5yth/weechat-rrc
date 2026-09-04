@@ -24,7 +24,7 @@ if the value drifted.
 
 from __future__ import annotations
 
-from rrc_helper import constants as C
+from rrc.helper import constants as C
 
 
 def test_protocol_version_is_one():

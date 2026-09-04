@@ -28,11 +28,11 @@ import os
 
 import pytest
 
-from rrc_helper import __main__ as helper_mod
-from rrc_helper import identity as identity_store
-from rrc_helper import ipc
-from rrc_helper import link as link_mod
-from rrc_helper.__main__ import Helper
+from rrc.helper import __main__ as helper_mod
+from rrc.helper import identity as identity_store
+from rrc.helper import ipc
+from rrc.helper import link as link_mod
+from rrc.helper.__main__ import Helper
 
 HUB = "28c7c1a68c735693aa8e6b8193ed44b2"
 PEER = "aabb0102030405060708090a0b0cccdd"
@@ -45,7 +45,7 @@ class FakeIdentity:
 
 
 class FakeHubLink:
-    """Stand-in for :class:`rrc_helper.link.HubLink`."""
+    """Stand-in for :class:`rrc.helper.link.HubLink`."""
 
     created = []
     fail_open = None
@@ -180,8 +180,8 @@ def test_disconnect_closes_and_stops_reconnecting(helper):
 @pytest.fixture
 def connected(helper):
     """Return a helper with an established, welcomed session."""
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper.handle({"op": "connect", "hub": HUB, "nick": "afri"})
     helper._on_up()
@@ -201,8 +201,8 @@ def test_autojoin_waits_for_welcome(helper):
     2-RRC lets a hub answer anything sent before it has accepted the session
     with an error instead of acting on it; rrcd's router does exactly that.
     """
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper.handle({"op": "connect", "hub": HUB, "autojoin": ["#general", 42]})
     link = FakeHubLink.created[0]
@@ -233,16 +233,16 @@ def test_autojoin_after_welcome_without_a_session_is_safe(helper):
 
 def _welcome(helper_obj):
     """Deliver a WELCOME, opening the session for room joins."""
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper_obj.session.on_frame(E.encode(C.T_WELCOME, src=bytes.fromhex(PEER), body={}))
 
 
 def _joined(helper_obj, room):
     """Deliver the hub's JOINED confirmation for our own join of *room*."""
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper_obj.session.on_frame(
         E.encode(
@@ -256,8 +256,8 @@ def _joined(helper_obj, room):
 
 def _rejoins(link):
     """Return the rooms this Link was asked to JOIN, in order."""
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     return [
         E.decode(frame).room for frame in link.sent if E.decode(frame).type == C.T_JOIN
@@ -496,8 +496,8 @@ def test_read_commands_falls_back_to_read(helper):
 
 def test_run_handles_link_events(helper):
     """Link callbacks are processed on the main loop, not the RNS thread."""
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper.handle({"op": "connect", "hub": HUB})
     link = FakeHubLink.created[0]
@@ -593,8 +593,8 @@ def test_hello_is_repeated_until_the_hub_welcomes(helper):
     ``None``, silently, so a HELLO that loses that race is simply lost and no
     WELCOME ever comes.
     """
-    from rrc_helper import constants as C
-    from rrc_helper import envelope as E
+    from rrc.helper import constants as C
+    from rrc.helper import envelope as E
 
     helper.handle({"op": "connect", "hub": HUB})
     link = FakeHubLink.created[0]

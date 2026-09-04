@@ -195,7 +195,7 @@ class Client:
         self.name = name
         self.events: list[dict] = []
         self.process = subprocess.Popen(
-            [PYTHON, "-m", "rrc_helper"],
+            [PYTHON, "-m", "rrc.helper"],
             cwd=str(ROOT),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

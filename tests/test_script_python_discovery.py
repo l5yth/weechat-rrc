@@ -38,8 +38,8 @@ def test_probe_accepts_an_interpreter_with_both_packages(wee, monkeypatch):
         seen["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(rrc.subprocess, "run", run)
-    assert rrc.probe_python("/usr/bin/python3") is True
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "run", run)
+    assert rrc.interpreter.probe_python("/usr/bin/python3") is True
     assert seen["cmd"][1:] == ["-c", "import RNS, cbor2"]
 
 
@@ -47,9 +47,11 @@ def test_probe_rejects_an_interpreter_missing_a_package(wee, monkeypatch):
     """A non-zero import check disqualifies the candidate."""
     _, rrc = wee
     monkeypatch.setattr(
-        rrc.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1)
+        rrc.connection_mod.subprocess,
+        "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1),
     )
-    assert rrc.probe_python("/usr/bin/python3") is False
+    assert rrc.interpreter.probe_python("/usr/bin/python3") is False
 
 
 @pytest.mark.parametrize(
@@ -62,8 +64,8 @@ def test_probe_survives_a_broken_candidate(wee, monkeypatch, error):
     def boom(cmd, **kwargs):
         raise error
 
-    monkeypatch.setattr(rrc.subprocess, "run", boom)
-    assert rrc.probe_python("/nonexistent/python") is False
+    monkeypatch.setattr(rrc.connection_mod.subprocess, "run", boom)
+    assert rrc.interpreter.probe_python("/nonexistent/python") is False
 
 
 def test_discovery_prefers_the_configured_interpreter(wee, monkeypatch):
@@ -71,24 +73,24 @@ def test_discovery_prefers_the_configured_interpreter(wee, monkeypatch):
     weechat, rrc = wee
     weechat.config_set_plugin("helper.python", "/opt/rrc/python")
     monkeypatch.setenv("RRC_PYTHON", "/env/python")
-    monkeypatch.setattr(rrc, "probe_python", lambda path: True)
-    assert rrc.find_python() == "/opt/rrc/python"
+    monkeypatch.setattr(rrc.interpreter, "probe_python", lambda path: True)
+    assert rrc.interpreter.find_python() == "/opt/rrc/python"
 
 
 def test_discovery_falls_back_to_the_environment(wee, monkeypatch):
     """``$RRC_PYTHON`` is used when no option is configured."""
     _, rrc = wee
     monkeypatch.setenv("RRC_PYTHON", "/env/python")
-    monkeypatch.setattr(rrc, "probe_python", lambda path: True)
-    assert rrc.find_python() == "/env/python"
+    monkeypatch.setattr(rrc.interpreter, "probe_python", lambda path: True)
+    assert rrc.interpreter.find_python() == "/env/python"
 
 
 def test_discovery_falls_back_to_the_system_interpreter(wee, monkeypatch):
     """A system Python with Reticulum installed needs no configuration."""
     _, rrc = wee
     monkeypatch.delenv("RRC_PYTHON", raising=False)
-    monkeypatch.setattr(rrc, "probe_python", lambda path: path == "python3")
-    assert rrc.find_python() == "python3"
+    monkeypatch.setattr(rrc.interpreter, "probe_python", lambda path: path == "python3")
+    assert rrc.interpreter.find_python() == "python3"
 
 
 def test_discovery_finds_the_documented_virtualenv(wee, monkeypatch):
@@ -99,8 +101,10 @@ def test_discovery_finds_the_documented_virtualenv(wee, monkeypatch):
     """
     _, rrc = wee
     monkeypatch.delenv("RRC_PYTHON", raising=False)
-    monkeypatch.setattr(rrc, "probe_python", lambda path: "rrc-venv" in path)
-    found = rrc.find_python()
+    monkeypatch.setattr(
+        rrc.interpreter, "probe_python", lambda path: "rrc-venv" in path
+    )
+    found = rrc.interpreter.find_python()
     assert found.endswith("/weechat/rrc-venv/bin/python")
     assert "~" not in found, "the path must be expanded before use"
 
@@ -110,9 +114,11 @@ def test_discovery_falls_back_to_a_generic_virtualenv(wee, monkeypatch):
     _, rrc = wee
     monkeypatch.delenv("RRC_PYTHON", raising=False)
     monkeypatch.setattr(
-        rrc, "probe_python", lambda path: path.endswith("/.venv/bin/python")
+        rrc.interpreter,
+        "probe_python",
+        lambda path: path.endswith("/.venv/bin/python"),
     )
-    assert rrc.find_python().endswith("/.venv/bin/python")
+    assert rrc.interpreter.find_python().endswith("/.venv/bin/python")
 
 
 def test_missing_python_guidance_is_actionable(wee):
@@ -122,7 +128,7 @@ def test_missing_python_guidance_is_actionable(wee):
     a distribution command, the PEP 668 escape hatch, and the config option.
     """
     _, rrc = wee
-    text = "\n".join(rrc.missing_python_help())
+    text = "\n".join(rrc.interpreter.missing_python_help())
     assert "RNS" in text and "cbor2" in text
     assert "python-rns" in text
     assert "externally-managed-environment" in text
@@ -138,14 +144,14 @@ def test_discovery_returns_none_when_nothing_qualifies(wee, monkeypatch):
     """With no usable interpreter, discovery reports failure rather than guess."""
     _, rrc = wee
     monkeypatch.delenv("RRC_PYTHON", raising=False)
-    monkeypatch.setattr(rrc, "probe_python", lambda path: False)
-    assert rrc.find_python() is None
+    monkeypatch.setattr(rrc.interpreter, "probe_python", lambda path: False)
+    assert rrc.interpreter.find_python() is None
 
 
 def test_connect_without_an_interpreter_names_the_option(wee, monkeypatch):
     """The failure tells the user exactly which setting to change."""
     weechat, rrc = wee
-    monkeypatch.setattr(rrc, "find_python", lambda: None)
+    monkeypatch.setattr(rrc.interpreter, "find_python", lambda: None)
     rrc.rrc_command_cb("", "", "connect 28c7c1a68c735693aa8e6b8193ed44b2")
     buffer = weechat.state.any_buffer("rrc.28c7c1a6")
     assert any("helper.python" in line for line in buffer.text)
@@ -154,7 +160,11 @@ def test_connect_without_an_interpreter_names_the_option(wee, monkeypatch):
 
 def test_no_interpreter_path_is_hardcoded():
     """The shipped script must not name a machine-specific interpreter."""
-    source = pathlib.Path("rrc.py").read_text(encoding="utf-8")
+    source = "".join(
+        p.read_text(encoding="utf-8")
+        for p in [pathlib.Path("rrc/rrc.py")]
+        + sorted(pathlib.Path("rrc/ui").glob("*.py"))
+    )
     assert "/home/" not in source
     assert "/usr/bin/python" not in source
     # The only venv reference is the tilde-prefixed fallback candidate.
@@ -165,27 +175,32 @@ def test_no_interpreter_path_is_hardcoded():
 def test_helper_directory_sits_beside_the_script(wee):
     """The helper package is found next to the script file."""
     _, rrc = wee
-    assert rrc.helper_directory().endswith("weechat-rrc")
+    assert rrc.interpreter.helper_directory().endswith("weechat-rrc")
 
 
 def test_script_dir_is_captured_at_load_time(wee, monkeypatch):
-    """The path must survive WeeChat clearing ``__file__``.
+    """The path must survive WeeChat clearing the script's ``__file__``.
 
-    WeeChat removes ``__file__`` from a script's globals before any callback
+    WeeChat removes ``__file__`` from a *script*'s globals before any callback
     runs. Reading it at connect time yielded ``None``, so the helper was looked
     for in the WeeChat data directory and ``/rrc connect`` failed with
-    "No module named rrc_helper" for any other install layout.
+    "No module named rrc.helper" for any other install layout.
+
+    Since the package layout landed the path comes from ``rrc/ui/interpreter``'s
+    own ``__file__``, which WeeChat does not touch because it is an imported
+    module rather than the script. The guarantee is therefore structural now,
+    and this asserts it stays that way.
     """
     _, rrc = wee
     monkeypatch.delitem(rrc.__dict__, "__file__", raising=False)
-    assert rrc.helper_directory().endswith("weechat-rrc")
+    assert rrc.interpreter.helper_directory().endswith("weechat-rrc")
 
 
 def test_helper_directory_falls_back_to_the_weechat_directory(wee, monkeypatch):
     """With no script path at all, the WeeChat data directory is used."""
     _, rrc = wee
-    monkeypatch.setattr(rrc, "SCRIPT_DIR", "")
-    assert rrc.helper_directory() == "/home/user/.config/weechat/python"
+    monkeypatch.setattr(rrc.interpreter, "SCRIPT_DIR", "")
+    assert rrc.interpreter.helper_directory() == "/home/user/.config/weechat/python"
 
 
 def test_helper_directory_follows_an_autoload_symlink(wee, tmp_path, monkeypatch):
@@ -197,30 +212,32 @@ def test_helper_directory_follows_an_autoload_symlink(wee, tmp_path, monkeypatch
     """
     _, rrc = wee
     scripts = tmp_path / "python"
-    (scripts / "rrc_helper").mkdir(parents=True)
+    (scripts / "rrc" / "helper").mkdir(parents=True)
     (scripts / "autoload").mkdir()
-    real = scripts / "rrc.py"
+    real = scripts / "rrc" / "rrc.py"
     real.write_text("")
     link = scripts / "autoload" / "rrc.py"
     link.symlink_to(real)
-    monkeypatch.setattr(rrc, "SCRIPT_DIR", os.path.dirname(os.path.realpath(link)))
-    assert rrc.helper_directory() == str(scripts)
+    monkeypatch.setattr(
+        rrc.interpreter, "SCRIPT_DIR", os.path.dirname(os.path.realpath(link))
+    )
+    assert rrc.interpreter.helper_directory() == str(scripts)
 
 
 def test_helper_directory_searches_the_parent_directory(wee, tmp_path, monkeypatch):
     """A copy in ``autoload/`` finds the package left in ``python/``."""
     _, rrc = wee
     scripts = tmp_path / "python"
-    (scripts / "rrc_helper").mkdir(parents=True)
+    (scripts / "rrc" / "helper").mkdir(parents=True)
     (scripts / "autoload").mkdir()
-    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(scripts / "autoload"))
-    assert rrc.helper_directory() == str(scripts)
+    monkeypatch.setattr(rrc.interpreter, "SCRIPT_DIR", str(scripts / "autoload"))
+    assert rrc.interpreter.helper_directory() == str(scripts)
 
 
 def test_helper_directory_prefers_the_script_directory(wee, tmp_path, monkeypatch):
     """When the package sits beside the script, that directory wins."""
     _, rrc = wee
     scripts = tmp_path / "python"
-    (scripts / "rrc_helper").mkdir(parents=True)
-    monkeypatch.setattr(rrc, "SCRIPT_DIR", str(scripts))
-    assert rrc.helper_directory() == str(scripts)
+    (scripts / "rrc" / "helper").mkdir(parents=True)
+    monkeypatch.setattr(rrc.interpreter, "SCRIPT_DIR", str(scripts))
+    assert rrc.interpreter.helper_directory() == str(scripts)

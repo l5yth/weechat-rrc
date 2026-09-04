@@ -26,7 +26,7 @@ from __future__ import annotations
 import cbor2
 import pytest
 
-from rrc_helper import constants as C
+from rrc.helper import constants as C
 from tests.conftest import Harness
 
 

@@ -16,7 +16,7 @@
 # limitations under the License.
 """Reticulum transport for an RRC hub connection.
 
-Everything that touches RNS lives here, so :mod:`rrc_helper.session` can stay a
+Everything that touches RNS lives here, so :mod:`rrc.helper.session` can stay a
 pure state machine. This module attaches to the operator's shared instance,
 resolves a path to the hub, opens a Link, and reports what happens through
 callbacks.
