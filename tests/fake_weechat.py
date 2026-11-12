@@ -313,6 +313,11 @@ NICK_COLORS = (
 )
 
 
+#: WeeChat's attribute bytes, which follow 0x1A to set an attribute and 0x1B to
+#: remove it.
+ATTRIBUTES = {"bold": "\x01", "italic": "\x03", "underline": "\x04"}
+
+
 def color(name):
     """Return a colour code shaped like the one real WeeChat returns.
 
@@ -323,9 +328,17 @@ def color(name):
     fake, no code ever reaches a rendered line, so every colour assertion in the
     suite passes without testing anything and the C8 injection check passes for
     the wrong reason.
+
+    Attributes are modelled byte for byte, because Micron rendering emits them
+    and the injection checks count them: WeeChat 4.10 answers ``bold`` with
+    ``0x1A 0x01`` and ``-bold`` with ``0x1B 0x01``, and likewise italic (``0x03``)
+    and underline (``0x04``), probed directly.
     """
     if name == "reset":
         return "\x1c"
+    if name.lstrip("-") in ATTRIBUTES:
+        marker = "\x1b" if name.startswith("-") else "\x1a"
+        return marker + ATTRIBUTES[name.lstrip("-")]
     return "\x19" + name
 
 

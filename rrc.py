@@ -50,6 +50,7 @@ DEFAULTS = {
     "reconnect": "on",
     "autojoin": "",
     "who_on_join": "on",
+    "micron": "on",
 }
 
 #: Import check a candidate interpreter must pass to run the helper.
@@ -111,6 +112,33 @@ MEMBER_LIST = re.compile(r"^members in (\S+):\s*(.+)$", re.DOTALL)
 #: matched as a prefix of a full one. Requiring hex keeps a parenthesised part
 #: of somebody's name, such as "Flo (floscodes)", from being read as an id.
 MEMBER_ENTRY = re.compile(r"\(([0-9a-f]{6,32})\)")
+
+#: One Micron tag as NomadNet writes it in a message. Micron's tag character
+#: is the backtick, but NomadNet runs message text through Markdown first,
+#: which would read a backtick as code, so its message syntax writes U+00A6
+#: BROKEN BAR instead and its renderer turns that back into the tag. Raw
+#: backticks are therefore never Micron here, and prose such as "run `ls`"
+#: stays exactly as typed.
+#:
+#: The groups are a colour's layer ("F" or "B"), then its 24-bit value (after
+#: "T") or its 12-bit one, then any other single-character tag. Every
+#: character of a colour value is a hex digit, so nothing from the hub reaches
+#: :func:`weechat.color` except a number this script computed from them.
+MICRON_TAG = re.compile(
+    "¦(?:([FB])(?:T([0-9a-fA-F]{6})|([0-9a-fA-F]{3}))|([fb!*_`<>{clra=]))"
+)
+
+#: A Micron tag that formats something: a colour, a default colour, or one of
+#: the three attribute toggles. Only a message carrying one is rendered, so a
+#: stray broken bar, a reset or a layout tag on its own leaves the text exactly
+#: as it was sent.
+MICRON_FORMAT = re.compile("¦(?:[FB](?:T[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|[fb!*_])")
+
+#: Micron's attribute toggles and the WeeChat attribute each one switches.
+MICRON_ATTRIBUTES = {"!": "bold", "*": "italic", "_": "underline"}
+
+#: The six channel levels of the xterm-256 colour cube, indices 16 to 231.
+XTERM_LEVELS = (0, 95, 135, 175, 215, 255)
 
 #: Marks a private-buffer callback payload, distinguishing it from a room.
 DM_PREFIX = "@"
@@ -315,6 +343,130 @@ def mention_key(text: object) -> str:
     wildcard is left to strip.
     """
     return "".join(ch for ch in tag_value(text) if ch != "*")
+
+
+def xterm256(red: int, green: int, blue: int) -> int:
+    """Return the xterm-256 colour index nearest to an RGB colour.
+
+    Two candidates are weighed: the nearest point of the 6x6x6 colour cube
+    (16-231) and the nearest step of the 24-step greyscale ramp (232-255), and
+    the closer of the two wins by squared distance. A tie goes to the cube.
+    WeeChat accepts these indices on any terminal it can draw 256 colours on,
+    and degrades them itself on one that cannot.
+
+    Args:
+        red: The red channel, 0-255.
+        green: The green channel, 0-255.
+        blue: The blue channel, 0-255.
+
+    Returns:
+        A colour index from 16 to 255.
+    """
+    channels = (red, green, blue)
+    cube = [
+        min(range(6), key=lambda i: (value - XTERM_LEVELS[i]) ** 2)
+        for value in channels
+    ]
+    cube_distance = sum(
+        (value - XTERM_LEVELS[i]) ** 2 for value, i in zip(channels, cube)
+    )
+    # The ramp runs 8, 18, ..., 238; anything darker or lighter clamps to an end.
+    mean = sum(channels) // 3
+    step = 0 if mean < 8 else 23 if mean > 238 else (mean - 8 + 5) // 10
+    grey = 8 + 10 * step
+    grey_distance = sum((value - grey) ** 2 for value in channels)
+    if grey_distance < cube_distance:
+        return 232 + step
+    return 16 + 36 * cube[0] + 6 * cube[1] + cube[2]
+
+
+def micron(text: str) -> str:
+    """Return *text* with its Micron tags rendered as WeeChat formatting.
+
+    NomadNet draws these tags in RRC messages, and senders use them for colour
+    art and for bold, italic and underlined text. Supported, in the broken-bar
+    form described at :data:`MICRON_TAG`:
+
+    - ``Fxxx`` / ``Bxxx``: 12-bit foreground / background colour;
+    - ``FTxxxxxx`` / ``BTxxxxxx``: 24-bit foreground / background colour;
+    - ``f`` / ``b``: the default foreground / background again;
+    - ``!``, ``*``, ``_``: toggle bold, italic, underline;
+    - a backtick: reset everything.
+
+    Every colour becomes the nearest xterm-256 index (:func:`xterm256`).
+    Layout, field and link tags (``<``, ``>``, ``{``, ``c``, ``l``, ``r``,
+    ``a``, ``=``) mean nothing on one buffer line and are dropped. A broken bar
+    followed by anything else is not a tag and is kept as written.
+
+    *text* must already be :func:`clean`. That is what makes this safe to run
+    on hub-supplied text: WeeChat's own formatting bytes are control characters,
+    so none survive into *text*, and every one in the result is returned by
+    :func:`weechat.color` for an argument this function built from a closed
+    vocabulary -- an index it computed, ``default``, an attribute name or
+    ``reset``. A trailing reset is always added, so the formatting ends with
+    the message whatever state the sender left it in.
+
+    Args:
+        text: The cleaned message text, containing at least one tag.
+
+    Returns:
+        The text with each tag replaced by its WeeChat colour code.
+    """
+    fg = bg = "default"
+    on = dict.fromkeys(MICRON_ATTRIBUTES, False)
+    parts = []
+    position = 0
+    for match in MICRON_TAG.finditer(text):
+        parts.append(text[position : match.start()])
+        position = match.end()
+        layer, rgb24, rgb12, tag = match.groups()
+        if layer:
+            if rgb24:
+                rgb = [int(rgb24[i : i + 2], 16) for i in (0, 2, 4)]
+            else:
+                rgb = [int(digit, 16) * 17 for digit in rgb12]
+            if layer == "F":
+                fg = str(xterm256(*rgb))
+            else:
+                bg = str(xterm256(*rgb))
+            parts.append(weechat.color(f"{fg},{bg}"))
+        elif tag in ("f", "b"):
+            if tag == "f":
+                fg = "default"
+            else:
+                bg = "default"
+            parts.append(weechat.color(f"{fg},{bg}"))
+        elif tag in on:
+            on[tag] = not on[tag]
+            name = MICRON_ATTRIBUTES[tag]
+            parts.append(weechat.color(name if on[tag] else f"-{name}"))
+        elif tag == "`":
+            fg = bg = "default"
+            on = dict.fromkeys(MICRON_ATTRIBUTES, False)
+            parts.append(weechat.color("reset"))
+        # Anything else is a layout, field or link tag: dropped.
+    parts.append(text[position:])
+    parts.append(weechat.color("reset"))
+    return "".join(parts)
+
+
+def formatted(text: str) -> str:
+    """Return cleaned message text, with its Micron rendered when there is any.
+
+    Only a message carrying a formatting tag is rendered (:data:`MICRON_FORMAT`);
+    everything else, including all of the plain text that makes up nearly every
+    conversation, is returned untouched. ``/set plugins.var.python.rrc.micron
+    off`` turns rendering off entirely and shows the tags as sent.
+
+    Args:
+        text: Message text that has already been through :func:`clean`.
+
+    Returns:
+        The text to print as the message body.
+    """
+    if weechat.config_get_plugin("micron") == "off" or not MICRON_FORMAT.search(text):
+        return text
+    return micron(text)
 
 
 def short(identity_hash: str) -> str:
@@ -984,6 +1136,8 @@ class Connection:
             level = () if kind == "notice" and not room else (NOTIFY_MESSAGE,)
             if roster:
                 level += (NO_HIGHLIGHT,)
+        # Rendered only now: the roster check above reads the text as sent.
+        body = formatted(body)
         if kind == "action":
             show(target, f" *\t{name} {body}", TAG_ACTION, *level, src=src, name=who)
         elif kind == "notice":
@@ -1008,7 +1162,7 @@ class Connection:
         show(
             buffer,
             f"{coloured(identity, nick or short(identity))}"
-            f"\t{clean(event.get('body'))}",
+            f"\t{formatted(clean(event.get('body')))}",
             TAG_DIRECT,
             NOTIFY_PRIVATE,
             src=identity,
@@ -1144,7 +1298,8 @@ def rrc_input_cb(data: str, buffer: str, text: str) -> int:
         # what makes your name look the same here as it does to everyone else.
         show(
             connection.dms[target[len(DM_PREFIX) :]],
-            f"{coloured(connection.identity, connection.nick or 'you')}\t{text}",
+            f"{coloured(connection.identity, connection.nick or 'you')}"
+            f"\t{formatted(clean(text))}",
             TAG_DIRECT,
             *SELF_TAGS,
             src=connection.identity,
