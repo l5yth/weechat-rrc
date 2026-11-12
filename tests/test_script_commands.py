@@ -63,6 +63,7 @@ def test_configuration_options_are_exactly_the_documented_set(wee):
         "reconnect",
         "autojoin",
         "who_on_join",
+        "micron",
     }
     assert set(rrc.DEFAULTS) == documented
     assert set(weechat.state.config) == documented, "main() seeded something else"
