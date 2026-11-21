@@ -126,10 +126,7 @@ Interpreter resolution: `helper.python` → `$RRC_PYTHON` → `python3` →
 
 ## Formatting
 
-NomadNet renders Micron in RRC messages, and people use it for colour art and
-for bold, italic and underlined text. Its message syntax writes the Micron tag
-character as `¦` (U+00A6) instead of a backtick. A message carrying such a tag
-is drawn in WeeChat colours:
+Messages with Micron tags in NomadNet's `¦` (U+00A6) form are drawn in colour:
 
 | Tag | Effect |
 | --- | --- |
@@ -139,10 +136,11 @@ is drawn in WeeChat colours:
 | `¦!` `¦*` `¦_` | Toggle bold / italic / underline |
 | `` ¦` `` | Reset |
 
-Colours map to the nearest of the 256 xterm colours. Layout and link tags
-(`¦<` `¦>` `¦{` `¦c` `¦l` `¦r` `¦a` `¦=`) are dropped. Raw backtick Micron is
-not interpreted, and a message without a `¦` tag is shown exactly as sent.
-`/set plugins.var.python.rrc.micron off` shows the tags as sent.
+- Colours use the nearest xterm-256 colour.
+- Layout and link tags (`¦<` `¦>` `¦{` `¦c` `¦l` `¦r` `¦a` `¦=`) are dropped.
+- Backtick Micron and messages without a `¦` tag are shown as sent.
+
+Show tags as sent: `/set plugins.var.python.rrc.micron off`
 
 ## Buffers
 

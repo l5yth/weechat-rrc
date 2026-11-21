@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
+# SPDX-FileCopyrightText: 2026 Afri Blanck (@l5yth)
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright © 2026 Afri Blank (@l5yth)
+# Copyright © 2026 Afri Blanck (@l5yth)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -79,6 +79,27 @@ def room(connected):
         return line.split(TAB, 1)[1]
 
     return weechat, rrc, render
+
+
+# -- the fake --------------------------------------------------------------
+
+
+def test_fake_models_weechat_attribute_bytes(wee):
+    """The fake answers ``color()`` with the bytes WeeChat 4.10.4 returns.
+
+    Micron rendering emits attribute codes and the injection checks count
+    them, so a fake answering ``""`` would let both pass without testing
+    anything. The values were probed under ``weechat-headless`` 4.10.4.
+    """
+    weechat, _ = wee
+    assert weechat.color("bold") == ATTRIBUTE + chr(1)
+    assert weechat.color("-bold") == REMOVE + chr(1)
+    assert weechat.color("italic") == ATTRIBUTE + chr(3)
+    assert weechat.color("-italic") == REMOVE + chr(3)
+    assert weechat.color("underline") == ATTRIBUTE + chr(4)
+    assert weechat.color("-underline") == REMOVE + chr(4)
+    assert weechat.color("reset") == RESET
+    assert weechat.color("default,196").startswith(COLOUR)
 
 
 # -- the colour map --------------------------------------------------------
@@ -169,10 +190,10 @@ def test_a_twelve_bit_background_and_its_default(room):
 def test_a_twenty_four_bit_colour_takes_the_nearest_index(room):
     """``FT`` and ``BT`` carry six hex digits, in either case."""
     weechat, rrc, render = room
-    assert render(BAR + "FT102030a" + BAR + "BTff0000b") == (
-        weechat.color(f"{rrc.xterm256(16, 32, 48)},default")
+    assert render(BAR + "FT3a5c7ea" + BAR + "BTFF0000b") == (
+        weechat.color(f"{rrc.xterm256(0x3A, 0x5C, 0x7E)},default")
         + "a"
-        + weechat.color(f"{rrc.xterm256(16, 32, 48)},196")
+        + weechat.color(f"{rrc.xterm256(0x3A, 0x5C, 0x7E)},196")
         + "b"
         + RESET
     )
@@ -296,6 +317,81 @@ def test_your_own_direct_echo_is_rendered_like_the_peer_sees_it(connected):
     assert process.written[-1]["text"] == BAR + "Ff00red", "sent as typed"
 
 
+def test_a_hub_wide_notice_is_rendered_on_the_server_buffer(connected):
+    """A notice with no room lands on the server buffer, rendered too.
+
+    That is where a hub's MOTD and announcements arrive, and they are somebody's
+    words as much as a room message is (``SPEC.md`` D28).
+    """
+    weechat, rrc, connection, process = connected
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "chat", "kind": "notice", "src": PEER, "body": BAR + "!motd"},
+    )
+    line = weechat.state.buffers[connection.buffer].lines[-1]
+    assert line == "--" + TAB + weechat.color("bold") + "motd" + RESET
+
+
+def test_a_nickname_is_never_rendered(connected):
+    """A nickname carrying tags is printed as sent, inside the plugin's colour.
+
+    The name sits in a span the plugin chose (``SPEC.md`` D22), so sender
+    formatting there would end the plugin's colour on the sender's terms. Only
+    the body is rendered (``SPEC.md`` D28), and the nicklist shows the name as
+    sent.
+    """
+    weechat, rrc, connection, process = connected
+    nick = BAR + "Ff00bob"
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#art", "members": []},
+        {
+            "op": "chat",
+            "kind": "msg",
+            "room": "#art",
+            "src": PEER,
+            "nick": nick,
+            "body": BAR + "!x",
+        },
+    )
+    room = weechat.state.buffers[connection.rooms["#art"]]
+    prefix, body = room.lines[-1].split(TAB, 1)
+    assert prefix == weechat.info_get("nick_color", PEER) + nick + RESET
+    assert prefix.count(COLOUR) == 1, "the nick colour is the only code"
+    assert body == weechat.color("bold") + "x" + RESET
+    assert nick in room.nicks
+
+
+def test_the_roster_check_reads_the_body_before_rendering(connected):
+    """A member listing with tags in its names is still a roster.
+
+    ``learn_members`` reads the body before it is rendered, so formatting can
+    neither hide a listing from the roster exemption nor put a formatting byte
+    into a learned name (``SPEC.md`` D25, D28). The line itself still renders.
+    """
+    weechat, rrc, connection, process = connected
+    name = BAR + "Ff00alice"
+    listing = f"members in #art: {name} ({PEER[:12]})"
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#art", "members": [PEER]},
+        {"op": "chat", "kind": "notice", "room": "#art", "src": PEER, "body": listing},
+    )
+    room = weechat.state.buffers[connection.rooms["#art"]]
+    assert "no_highlight" in room.tags_for("members in")
+    assert connection.members["#art"][PEER] == name, "learned as sent"
+    assert name in room.nicks
+    assert room.lines[-1].endswith(
+        weechat.color("196,default") + f"alice ({PEER[:12]})" + RESET
+    )
+
+
 def test_the_option_turns_rendering_off(room):
     """``micron off`` shows the tags exactly as they were sent."""
     weechat, _, render = room
@@ -308,6 +404,17 @@ def test_the_option_defaults_to_on(wee):
     weechat, rrc = wee
     rrc.main()
     assert weechat.config_get_plugin("micron") == "on"
+
+
+@pytest.mark.parametrize("value", ["", "on", "0", "no", "OFF"])
+def test_the_option_is_off_only_when_set_to_off(room, value):
+    """Any value but ``off`` leaves rendering on (``SPEC.md`` D31).
+
+    That is how ``who_on_join`` reads its own value, so the two options agree.
+    """
+    weechat, _, render = room
+    weechat.config_set_plugin("micron", value)
+    assert render(BAR + "!x") == weechat.color("bold") + "x" + RESET
 
 
 def test_the_line_keeps_its_tags(connected):
@@ -327,19 +434,21 @@ def test_the_line_keeps_its_tags(connected):
 # -- injection -------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "hostile",
-    [
-        BAR + "Ff00a" + COLOUR + "F31b",
-        BAR + "Ff00a" + RESET + "b",
-        BAR + "!a" + ATTRIBUTE + chr(1) + "b",
-        BAR + "!a" + REMOVE + chr(1) + "b",
-        BAR + "Ff00line one" + NL + "forged second line",
-        BAR + "Ff00" + ESC + "[31mansi",
-        BAR + "F" + COLOUR + "F31",
-        BAR + "FT" + COLOUR + "lightred",
-    ],
-)
+#: Hub bodies that splice WeeChat's formatting bytes, a newline or an ANSI
+#: escape around and inside Micron tags.
+HOSTILE = [
+    BAR + "Ff00a" + COLOUR + "F31b",
+    BAR + "Ff00a" + RESET + "b",
+    BAR + "!a" + ATTRIBUTE + chr(1) + "b",
+    BAR + "!a" + REMOVE + chr(1) + "b",
+    BAR + "Ff00line one" + NL + "forged second line",
+    BAR + "Ff00" + ESC + "[31mansi",
+    BAR + "F" + COLOUR + "F31",
+    BAR + "FT" + COLOUR + "lightred",
+]
+
+
+@pytest.mark.parametrize("hostile", HOSTILE)
 def test_control_characters_never_survive_rendering(connected, hostile):
     """Formatting in the body is the script's own: one reset, nothing forged.
 
@@ -363,6 +472,31 @@ def test_control_characters_never_survive_rendering(connected, hostile):
     assert body.count(RESET) == (1 if rrc.MICRON_FORMAT.search(cleaned) else 0)
     for byte in (NL, ESC + "[", COLOUR + "F31", RESET + "b"):
         assert byte not in body, "hub text kept a formatting byte"
+
+
+@pytest.mark.parametrize("hostile", HOSTILE)
+def test_control_characters_from_the_hub_never_reach_a_rendered_body(
+    connected, hostile, monkeypatch
+):
+    """Every formatting byte in a rendered body is one ``weechat.color()`` gave.
+
+    ``weechat.color()`` answers with a printable stand-in here, so a formatting
+    byte or newline left in the body can only have come from the hub
+    (``SPEC.md`` D29).
+    """
+    weechat, rrc, connection, process = connected
+    monkeypatch.setattr(weechat, "color", lambda name: f"<{name}>")
+    deliver(
+        rrc,
+        connection,
+        process,
+        {"op": "joined", "room": "#art", "members": []},
+        {"op": "chat", "kind": "msg", "room": "#art", "src": PEER, "body": hostile},
+    )
+    line = weechat.state.buffers[connection.rooms["#art"]].lines[-1]
+    body = line.split(TAB, 1)[1]
+    for byte in (COLOUR, ATTRIBUTE, REMOVE, RESET, NL):
+        assert byte not in body, f"hub byte {byte!r} reached the body"
 
 
 def test_only_the_closed_vocabulary_reaches_weechat_color(room, monkeypatch):
