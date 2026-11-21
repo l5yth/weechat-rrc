@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
+SPDX-FileCopyrightText: 2026 Afri Blanck (@l5yth)
 SPDX-License-Identifier: Apache-2.0
 -->
 

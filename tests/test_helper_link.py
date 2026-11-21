@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: 2026 Afri Blank (@l5yth)
+# SPDX-FileCopyrightText: 2026 Afri Blanck (@l5yth)
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright © 2026 Afri Blank (@l5yth)
+# Copyright © 2026 Afri Blanck (@l5yth)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
