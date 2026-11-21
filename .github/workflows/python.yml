@@ -88,10 +88,17 @@ jobs:
         # Give the instance a deterministic owner. Without one, whichever
         # process starts first becomes it, and a client that loses the race
         # comes up isolated with no interfaces and never finds a path.
+        #
+        # Wait by reading the socket table, never with a Reticulum program
+        # such as rnstatus. On this fresh ~/.reticulum, one started now races
+        # rnsd to create storage/transport_identity; when it writes last,
+        # rnsd rejects every later process's RPC key, the hub's included, and
+        # the hub drops every HELLO (ACCEPTANCE A1c). rnsd opens its RPC
+        # listener on instance_control_port only after its identity is stored.
         run: |
           rnsd &
           for _ in $(seq 1 20); do
-            rnstatus >/dev/null 2>&1 && break
+            ss -ltn | grep -qF 127.0.0.1:37501 && break
             sleep 1
           done
           rnstatus || echo "no shared instance; the hub will become one"
